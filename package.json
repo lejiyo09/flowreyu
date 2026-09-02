@@ -1,0 +1,18 @@
+{
+  "name": "1-2-gemini-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "1-2 커뮤니티 폐급리스트 Gemini API 실험용 서버",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0"
+  }
+}
