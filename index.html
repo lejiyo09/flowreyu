@@ -3,198 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>1-2 폐급리스트 AI 테스트</title>
+  <title>Paperline — PDF Notes</title>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #111;
-      color: #eee;
-    }
-    .wrap {
-      width: min(760px, calc(100% - 28px));
-      margin: 0 auto;
-      padding: 42px 0 70px;
-    }
-    h1 { margin: 0 0 8px; font-size: 32px; }
-    .sub { color: #999; margin-bottom: 28px; }
-    .card {
-      background: #1b1b1b;
-      border: 1px solid #303030;
-      border-radius: 18px;
-      padding: 22px;
-      margin-bottom: 16px;
-    }
-    label { display:block; margin: 0 0 8px; font-weight: 700; }
-    input, textarea {
-      width: 100%;
-      border: 1px solid #3a3a3a;
-      background: #111;
-      color: #eee;
-      border-radius: 12px;
-      padding: 13px;
-      font: inherit;
-      outline: none;
-    }
-    textarea { min-height: 150px; resize: vertical; }
-    input:focus, textarea:focus { border-color: #777; }
-    button {
-      width: 100%;
-      margin-top: 16px;
-      border: 0;
-      border-radius: 12px;
-      padding: 14px;
-      background: #eee;
-      color: #111;
-      font-weight: 800;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    button:disabled { opacity: .5; cursor: wait; }
-    .result { display:none; }
-    .score {
-      display:flex;
-      align-items:center;
-      gap:18px;
-      margin-bottom: 18px;
-    }
-    .number { font-size: 56px; font-weight: 900; line-height: 1; }
-    .grade { font-size: 25px; font-weight: 900; }
-    .title { font-size: 25px; font-weight: 900; margin-bottom: 8px; }
-    .muted { color:#aaa; }
-    .action {
-      border-top: 1px solid #303030;
-      padding: 13px 0;
-    }
-    .error {
-      display:none;
-      background:#351b1b;
-      border:1px solid #713434;
-      color:#ffbdbd;
-      padding:13px;
-      border-radius:12px;
-      margin-top:16px;
-      white-space:pre-wrap;
-    }
-    .status { color:#999; font-size:13px; margin-top:10px; }
+    :root { --ink:#263655; --muted:#73809a; --line:#e6eaf1; --paper:#fff; --surface:#f6f8fc; --accent:#5365eb; --accent-pale:#eef0ff; --shadow:0 16px 42px rgba(45,63,103,.12); }
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:#e9edf5;overflow:hidden} button,input{font:inherit} button{cursor:pointer;border:0} .app{height:100vh;background:var(--surface);position:relative;overflow:hidden}
+    .topbar{height:70px;background:rgba(255,255,255,.92);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 26px;gap:20px;position:relative;z-index:4}.brand{display:flex;align-items:center;gap:10px;font-weight:750;letter-spacing:-.6px;font-size:19px}.brand-mark{width:27px;height:27px;border-radius:9px;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:16px;box-shadow:0 5px 10px #c5cbff}.document-name{color:var(--muted);font-size:14px;border-left:1px solid var(--line);padding-left:20px}.top-actions{margin-left:auto;display:flex;align-items:center;gap:9px}.save-state{display:flex;align-items:center;gap:7px;color:#66728a;font-size:13px;margin-right:13px}.save-dot{width:7px;height:7px;border-radius:50%;background:#35b682;box-shadow:0 0 0 4px #daf6e9}.icon-button,.round-button{background:#fff;border:1px solid var(--line);color:#51607b;display:grid;place-items:center;transition:.2s}.icon-button{width:38px;height:38px;border-radius:11px}.icon-button:hover,.round-button:hover{border-color:#aab6e9;color:var(--accent);background:#fafaff}.main{height:calc(100vh - 70px);display:flex}.sidebar{width:224px;background:#fff;border-right:1px solid var(--line);padding:24px 14px;z-index:2}.new-page{width:100%;height:42px;border-radius:11px;background:var(--accent);color:white;font-weight:650;box-shadow:0 7px 16px rgba(83,101,235,.24)}.side-title{font-size:11px;text-transform:uppercase;letter-spacing:1.1px;color:#9aa5b8;font-weight:750;margin:30px 10px 11px}.page-item{height:56px;border-radius:11px;padding:8px 10px;display:flex;align-items:center;gap:10px;color:#6f7c95;font-size:13px;position:relative}.page-item.active{background:var(--accent-pale);color:#4455d5;font-weight:700}.page-thumbnail{width:28px;height:37px;border-radius:3px;background:#fff;border:1px solid #e2e6ef;box-shadow:0 2px 4px #dfe3ec;display:grid;place-items:center;font-size:9px;color:#aab3c1}.page-item.active .page-thumbnail{border-color:#c6ccff}.page-more{margin-left:auto;color:#a4afc0}.outline-item{padding:9px 11px;font-size:13px;color:#7a869c;border-radius:8px}.outline-item.selected{color:var(--accent);font-weight:650}.workspace{flex:1;overflow:auto;position:relative;background:linear-gradient(90deg,#f0f3f9 0%,#f8f9fc 50%,#f0f3f9 100%);padding:42px 40px 90px;display:flex;justify-content:center}.paper{width:min(816px,calc(100vw - 390px));min-height:1056px;background:var(--paper);box-shadow:0 10px 35px rgba(57,69,101,.16);position:relative;padding:87px 82px;color:#293956;overflow:hidden}.paper:before{content:"";position:absolute;left:0;right:0;top:55px;border-top:1px solid #eef0f5}.paper-header{display:flex;justify-content:space-between;color:#9ba6b6;font-size:12px;letter-spacing:.4px}.paper h1{font-size:34px;letter-spacing:-1.5px;margin:38px 0 14px;line-height:1.15}.paper p{font-size:15px;line-height:1.85;color:#61708a;max-width:600px}.highlight{background:linear-gradient(transparent 38%,#fff0a9 38%,#fff0a9 87%,transparent 87%);color:#41506c}.section-title{font-weight:750;font-size:17px;color:#31405b;margin:37px 0 11px}.note-card{border-left:3px solid #8190ff;background:#f6f7ff;border-radius:0 10px 10px 0;padding:15px 18px;color:#586781;font-size:14px;line-height:1.7;margin:24px 0}.rule{height:1px;background:#eef0f5;margin:28px 0}.floating-toolbar{position:absolute;left:50%;transform:translateX(-50%);top:24px;height:56px;padding:7px 10px;background:rgba(255,255,255,.96);box-shadow:var(--shadow);border:1px solid rgba(228,232,241,.9);border-radius:16px;display:flex;align-items:center;gap:3px;z-index:3;backdrop-filter:blur(12px)}.tool{width:39px;height:39px;background:transparent;color:#64718b;border-radius:10px;display:grid;place-items:center;position:relative}.tool:hover{background:#f3f5fb}.tool.selected{background:var(--accent);color:#fff;box-shadow:0 4px 10px rgba(83,101,235,.24)}.separator{height:26px;width:1px;background:#e7eaf1;margin:0 4px}.tool-label{font-size:11px;position:absolute;top:46px;white-space:nowrap;background:#202a40;color:#fff;padding:4px 7px;border-radius:5px;opacity:0;pointer-events:none}.tool:hover .tool-label{opacity:1}.color-dot{width:17px;height:17px;background:#e6526e;border-radius:50%;border:2px solid white;box-shadow:0 0 0 1px #d8ddea}.zoom{position:fixed;bottom:26px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:8px;background:#fff;padding:7px 10px;border:1px solid var(--line);border-radius:12px;box-shadow:0 7px 20px rgba(38,54,85,.11);z-index:5}.zoom button{width:28px;height:28px;border-radius:7px;background:#f5f7fb;color:#60708c;font-size:17px}.zoom span{font-size:12px;width:35px;text-align:center;color:#71809a}.page-tools{position:fixed;right:27px;top:96px;display:flex;flex-direction:column;gap:9px;z-index:4}.round-button{width:42px;height:42px;border-radius:13px}.annotation{position:absolute;z-index:2;cursor:grab;user-select:none}.annotation:focus{outline:2px solid #8390fa;outline-offset:4px}.text-note{font-size:17px;font-weight:650;color:#e04f6a;background:rgba(255,241,178,.55);padding:3px 5px;transform:rotate(-1deg)}.ink{width:190px;height:55px;pointer-events:none}.settings{position:fixed;inset:0;background:rgba(21,30,48,.25);z-index:10;display:none;align-items:center;justify-content:center}.settings.open{display:flex}.settings-card{width:min(460px,calc(100vw - 36px));background:#fff;border-radius:20px;box-shadow:0 24px 80px rgba(18,28,51,.28);padding:25px}.settings-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px}.settings-head h2{font-size:20px;letter-spacing:-.5px;margin:0}.close{background:#f4f6fa;border-radius:9px;width:32px;height:32px;color:#64718b}.setting-row{padding:15px 0;border-top:1px solid #eef0f4;display:flex;justify-content:space-between;align-items:center;gap:20px}.setting-row:first-of-type{border-top:0}.setting-copy strong{display:block;font-size:14px}.setting-copy small{display:block;color:#8390a4;font-size:12px;margin-top:4px;line-height:1.4}.switch{width:44px;height:25px;border-radius:20px;background:#dce1eb;padding:3px;transition:.2s}.switch:after{content:"";display:block;width:19px;height:19px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #aeb6c7;transition:.2s}.switch.on{background:var(--accent)}.switch.on:after{transform:translateX(19px)}.setting-row select{border:1px solid #dfe4ee;border-radius:8px;padding:7px 27px 7px 9px;color:#55647f;background:#fff}.toast{position:fixed;bottom:80px;left:50%;transform:translate(-50%,20px);background:#263655;color:#fff;padding:10px 15px;border-radius:9px;font-size:13px;opacity:0;transition:.25s;z-index:20}.toast.show{opacity:1;transform:translate(-50%,0)}body.dark{--ink:#e5eaff;--muted:#a6b1c7;--line:#29344a;--paper:#1d2639;--surface:#131b2a;background:#0e1420}body.dark .topbar,body.dark .sidebar,body.dark .floating-toolbar,body.dark .zoom,body.dark .settings-card{background:#1b2538}body.dark .paper{color:#dde5fa}body.dark .paper h1{color:#f2f5ff}body.dark .paper p{color:#b6c1d7}body.dark .paper:before,body.dark .rule{border-color:#2d384e;background:#2d384e}body.dark .note-card{background:#252e4e;color:#c3cdf1}body.dark .icon-button,body.dark .round-button{background:#202a3e;border-color:#34415a;color:#bac5da}body.dark .page-thumbnail{background:#273148;border-color:#38445d}@media(max-width:760px){.sidebar{display:none}.document-name{display:none}.topbar{padding:0 14px}.workspace{padding:28px 12px 90px}.paper{width:100%;padding:82px 34px;min-height:900px}.floating-toolbar{transform:translateX(-50%) scale(.88);transform-origin:top center}.save-state{display:none}.page-tools{right:14px}.paper h1{font-size:29px}}
   </style>
 </head>
 <body>
-  <main class="wrap">
-    <h1>🏆 폐급리스트 AI</h1>
-    <div class="sub">Gemini API 연결 테스트용 1차 프로토타입</div>
-
-    <section class="card">
-      <label for="name">닉네임</label>
-      <input id="name" placeholder="예: 철수" maxlength="30">
-
-      <label for="actions" style="margin-top:18px;">행동 목록</label>
-      <textarea id="actions" placeholder="한 줄에 하나씩 입력하세요.
-
-예:
-수업 시간에 몰래 게임함
-급식 줄을 새치기함
-친구 숙제를 베낌"></textarea>
-
-      <button id="analyze">AI 분석하기</button>
-      <div id="status" class="status"></div>
-      <div id="error" class="error"></div>
-    </section>
-
-    <section id="result" class="card result">
-      <div class="score">
-        <div class="number" id="score">0</div>
-        <div>
-          <div class="grade" id="grade">-</div>
-          <div class="muted">폐급도</div>
-        </div>
-      </div>
-
-      <div class="title" id="title"></div>
-      <p id="summary"></p>
-      <p class="muted" id="comment"></p>
-
-      <h3>행동별 분석</h3>
-      <div id="actionsResult"></div>
-    </section>
-  </main>
-
+  <div class="app">
+    <header class="topbar"><div class="brand"><span class="brand-mark">⌁</span>Paperline</div><div class="document-name" id="documentName">강의 노트 · 2025. 04. 28</div><div class="top-actions"><div class="save-state"><span class="save-dot"></span><span id="saveLabel">모든 변경사항 저장됨</span></div><button class="icon-button" id="importPdf" aria-label="PDF 가져오기">⇧</button><button class="icon-button" id="settingsButton" aria-label="설정">⚙</button></div></header>
+    <main class="main"><aside class="sidebar"><button class="new-page" id="newPage">＋ 새 페이지</button><div class="side-title">페이지</div><div class="page-item active"><span class="page-thumbnail">1</span><span>강의 노트</span><span class="page-more">•••</span></div><div class="page-item"><span class="page-thumbnail">2</span><span>빈 페이지</span></div><div class="side-title">문서 개요</div><div class="outline-item selected">소개</div><div class="outline-item">핵심 개념</div><div class="outline-item">다음 할 일</div></aside>
+      <section class="workspace"><div class="floating-toolbar" id="toolbar"><button class="tool selected" data-tool="pen">✎<span class="tool-label">펜</span></button><button class="tool" data-tool="highlighter">▰<span class="tool-label">형광펜</span></button><button class="tool" data-tool="eraser">⌫<span class="tool-label">지우개</span></button><span class="separator"></span><button class="tool" data-tool="text">T<span class="tool-label">텍스트</span></button><button class="tool" data-tool="comment">▢<span class="tool-label">주석</span></button><span class="separator"></span><button class="tool" id="colorButton"><span class="color-dot"></span><span class="tool-label">색상</span></button></div>
+        <article class="paper" id="paper"><div class="paper-header"><span>인지심리학 · 04</span><span>PAGE 01</span></div><h1>집중과 기억에 관한<br>작은 관찰</h1><p>우리는 새로운 정보를 받아들일 때, 이미 알고 있는 것과 연결하며 의미를 만듭니다. <span class="highlight">기억은 단순한 저장이 아니라, 필요한 순간 다시 구성하는 과정</span>에 가깝습니다.</p><div class="note-card">“배운 것을 내 언어로 다시 설명할 수 있을 때, 비로소 내 것이 된다.”</div><div class="section-title">핵심 개념</div><p>주의는 한정된 자원입니다. 한 번에 많은 일을 처리하려 하기보다, 하나의 과제에 충분한 시간을 주는 편이 더 깊은 이해로 이어집니다.</p><div class="rule"></div><div class="section-title">다음 할 일</div><p>· 오늘 배운 개념을 3문장으로 요약하기<br>· 실생활에서 관찰한 사례 한 가지 기록하기</p><div class="annotation text-note" id="note" tabindex="0" style="left:405px;top:290px">이 부분 시험에 나옴!</div><svg class="annotation ink" id="ink" style="left:356px;top:543px" viewBox="0 0 190 55" aria-label="펜 주석"><path d="M8 30 C35 4, 48 49, 76 24 S118 10, 132 29 S162 42, 181 13" fill="none" stroke="#e6526e" stroke-width="4" stroke-linecap="round"/></svg></article></section>
+    </main><div class="page-tools"><button class="round-button" id="pageView" title="페이지 보기">▤</button><button class="round-button" id="download" title="PDF 주석 저장">↓</button></div><div class="zoom"><button id="zoomOut">−</button><span id="zoomValue">100%</span><button id="zoomIn">＋</button></div>
+  </div>
+  <input type="file" id="pdfInput" accept="application/pdf" hidden>
+  <div class="settings" id="settings"><section class="settings-card"><div class="settings-head"><h2>노트 설정</h2><button class="close" id="closeSettings">×</button></div><div class="setting-row"><div class="setting-copy"><strong>상시 자동 저장</strong><small>PDF 주석과 노트 변경사항을 자동으로 저장합니다.</small></div><button class="switch on" data-setting="autosave"></button></div><div class="setting-row"><div class="setting-copy"><strong>팜 리젝션</strong><small>손바닥이 화면에 닿아도 펜 입력만 인식합니다.</small></div><button class="switch on" data-setting="palm"></button></div><div class="setting-row"><div class="setting-copy"><strong>길게 눌러 도구 UI 열기</strong><small>필기 중 도구 모음을 빠르게 표시합니다.</small></div><button class="switch on" data-setting="hold"></button></div><div class="setting-row"><div class="setting-copy"><strong>길게 누르기 시간</strong><small>정지 상태가 이 시간 이상이면 도구 UI가 열립니다.</small></div><select id="holdTime"><option value="800">0.8초</option><option value="1200" selected>1.2초</option><option value="1800">1.8초</option><option value="2500">2.5초</option></select></div><div class="setting-row"><div class="setting-copy"><strong>다크 모드</strong><small>주변 밝기에 맞는 편안한 화면으로 전환합니다.</small></div><button class="switch" id="darkMode"></button></div></section></div><div class="toast" id="toast"></div>
   <script>
-    const $ = (id) => document.getElementById(id);
-
-    $("analyze").addEventListener("click", async () => {
-      const name = $("name").value.trim();
-      const actions = $("actions").value
-        .split("\n")
-        .map(v => v.trim())
-        .filter(Boolean);
-
-      $("error").style.display = "none";
-      $("result").style.display = "none";
-
-      if (!name || !actions.length) {
-        $("error").textContent = "닉네임과 행동을 입력해주세요.";
-        $("error").style.display = "block";
-        return;
-      }
-
-      $("analyze").disabled = true;
-      $("status").textContent = "Gemini가 분석 중...";
-
-      try {
-        const response = await fetch("/api/waste/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, actions })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-          throw new Error(
-            data.error + (data.detail ? "\n" + JSON.stringify(data.detail, null, 2) : "")
-          );
-        }
-
-        $("score").textContent = data.score;
-        $("grade").textContent = data.grade;
-        $("title").textContent = data.title;
-        $("summary").textContent = data.summary;
-        $("comment").textContent = data.comment;
-
-        $("actionsResult").innerHTML = "";
-        for (const item of data.actions || []) {
-          const div = document.createElement("div");
-          div.className = "action";
-          div.innerHTML = `
-            <strong>${escapeHtml(item.action)}</strong>
-            <span class="muted"> — ${item.score}점</span>
-            <div class="muted" style="margin-top:5px">${escapeHtml(item.reason)}</div>
-          `;
-          $("actionsResult").appendChild(div);
-        }
-
-        $("result").style.display = "block";
-        $("status").textContent = "분석 완료";
-      } catch (err) {
-        $("error").textContent = err.message || "알 수 없는 오류";
-        $("error").style.display = "block";
-        $("status").textContent = "";
-      } finally {
-        $("analyze").disabled = false;
-      }
-    });
-
-    function escapeHtml(value) {
-      return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
+    const $ = id => document.getElementById(id); let selectedTool = 'pen', zoom = 100, holdTimer, dragged, settings = {autosave:true,palm:true,hold:true};
+    const toast = message => { const el=$('toast'); el.textContent=message; el.classList.add('show'); clearTimeout(el.timer); el.timer=setTimeout(()=>el.classList.remove('show'),2200); };
+    function save(){ if(!settings.autosave)return; $('saveLabel').textContent='저장 중...'; localStorage.setItem('paperline-note', JSON.stringify({note:$('note').style.cssText, dark:document.body.classList.contains('dark')})); setTimeout(()=>$('saveLabel').textContent='모든 변경사항 저장됨',450); }
+    document.querySelectorAll('[data-tool]').forEach(btn=>btn.onclick=()=>{selectedTool=btn.dataset.tool;document.querySelectorAll('[data-tool]').forEach(x=>x.classList.toggle('selected',x===btn));toast(`${btn.querySelector('.tool-label').textContent} 도구 선택됨`)});
+    $('settingsButton').onclick=()=>$('settings').classList.add('open'); $('closeSettings').onclick=()=>$('settings').classList.remove('open'); $('settings').onclick=e=>{if(e.target===$('settings'))$('settings').classList.remove('open')};
+    document.querySelectorAll('[data-setting]').forEach(btn=>btn.onclick=()=>{const key=btn.dataset.setting; settings[key]=!settings[key];btn.classList.toggle('on',settings[key]); save();});
+    $('darkMode').onclick=e=>{document.body.classList.toggle('dark');e.currentTarget.classList.toggle('on');save()};
+    $('zoomIn').onclick=()=>changeZoom(10); $('zoomOut').onclick=()=>changeZoom(-10); function changeZoom(delta){zoom=Math.max(70,Math.min(130,zoom+delta));$('paper').style.transform=`scale(${zoom/100})`;$('paper').style.transformOrigin='top center';$('workspace').style.paddingBottom=`${90+(zoom-100)*10}px`;$('zoomValue').textContent=`${zoom}%`;}
+    $('importPdf').onclick=()=>$('pdfInput').click(); $('pdfInput').onchange=e=>{const file=e.target.files[0];if(file){$('documentName').textContent=file.name.replace(/\.pdf$/i,'')+' · PDF';toast('PDF를 불러왔습니다. 주석 편집을 시작하세요.');save()}};
+    $('download').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify({document:$('documentName').textContent,annotations:[{type:'text',content:$('note').textContent,position:$('note').style.cssText},{type:'ink'}],savedAt:new Date().toISOString()},null,2)],{type:'application/json'}));a.download='paperline-annotations.json';a.click();URL.revokeObjectURL(a.href);toast('PDF 주석 파일을 저장했습니다.');}; $('newPage').onclick=()=>toast('새 빈 페이지가 추가되었습니다.'); $('pageView').onclick=()=>toast('페이지 보기 모드입니다.');
+    const note=$('note'); note.addEventListener('pointerdown',e=>{if(settings.palm&&e.pointerType==='touch')return;dragged={x:e.clientX,y:e.clientY,left:parseInt(note.style.left),top:parseInt(note.style.top)};note.setPointerCapture(e.pointerId)}); note.addEventListener('pointermove',e=>{if(!dragged)return;note.style.left=dragged.left+e.clientX-dragged.x+'px';note.style.top=dragged.top+e.clientY-dragged.y+'px'}); note.addEventListener('pointerup',()=>{if(dragged){dragged=null;save()}});
+    $('paper').addEventListener('pointerdown',e=>{if(!settings.hold||e.target!==$('paper'))return;holdTimer=setTimeout(()=>{ $('toolbar').animate([{transform:'translateX(-50%) scale(.88)'},{transform:'translateX(-50%) scale(1)'}],{duration:200});toast('도구 UI를 열었습니다.');},+$('holdTime').value)}); ['pointerup','pointermove','pointercancel'].forEach(type=>$('paper').addEventListener(type,()=>clearTimeout(holdTimer)));
+    const prior=localStorage.getItem('paperline-note');if(prior){try{const state=JSON.parse(prior);if(state.note)note.style.cssText=state.note;if(state.dark){document.body.classList.add('dark');$('darkMode').classList.add('on')}}catch{}}
   </script>
 </body>
 </html>
