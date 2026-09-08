@@ -38,17 +38,61 @@
       ['black','검정 펜','pen','#20242c',3,1],['blue','파랑 펜','pen','#2864dc',3,1],['red','빨강 펜','pen','#df3e52',3,1],['green','초록 펜','pen','#20966b',3,1],
       ['yellow','노랑 형광펜','highlighter','#f5d849',14,.35],['lime','초록 형광펜','highlighter','#71d67d',14,.35],['pink','분홍 형광펜','highlighter','#ef8ab6',14,.35],['sky','파랑 형광펜','highlighter','#78bdf3',14,.35]
     ].map(([id,name,tool,color,width,opacity])=>({id,name,tool,color,width,opacity,base:true}));
-    const state={pdf:null,pdfBytes:null,fileName:'',pages:[],zoom:1,tool:'pen',activePresetId:'black',presets:[],settings:{autosave:true,palm:true,hold:true},input:{drawing:null,erasing:null,lasso:null,movingSelection:null,touches:new Map(),gesture:null,holdTimer:null}};
+    const state={pdf:null,pdfBytes:null,fileName:'',pages:[],zoom:1,renderGeneration:0,tool:'pen',activePresetId:'black',presets:[],settings:{autosave:true,palm:true,hold:true},input:{drawing:null,erasing:null,lasso:null,movingSelection:null,touches:new Map(),gesture:null,holdTimer:null}};
     const toast=t=>{const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(e.timer);e.timer=setTimeout(()=>e.classList.remove('show'),1800)};
     const saveLabel=t=>$('saveState').textContent=t, docKey=()=>state.fileName?`paperline:${state.fileName}:${state.pdfBytes?.byteLength}`:'';
     function loadPresets(){try{const custom=JSON.parse(localStorage.getItem(PRESET_KEY)||'[]');state.presets=[...defaults,...custom]}catch{state.presets=[...defaults]}applyPreset(state.presets[0]);}
     function savePresets(){localStorage.setItem(PRESET_KEY,JSON.stringify(state.presets.filter(p=>!p.base)));}
     function activePreset(){return state.presets.find(p=>p.id===state.activePresetId)||state.presets[0]}
     function applyPreset(p){state.activePresetId=p.id;state.tool=p.tool;$('colorInput').value=p.color;$('widthInput').value=p.width;$('widthValue').textContent=`${p.width}px`;$('colorButton').style.background=p.color;$('penIndicator').style.color=(p.tool==='pen'?p.color:'');$('highlighterIndicator').style.color=(p.tool==='highlighter'?p.color:'');document.querySelectorAll('[data-tool]').forEach(b=>b.classList.toggle('selected',b.dataset.tool===p.tool));}
-    function persist(){if(!state.settings.autosave||!state.pdfBytes)return;saveLabel('저장 중...');localStorage.setItem(docKey(),JSON.stringify(state.pages.map(p=>({strokes:p.strokes,texts:p.texts}))));setTimeout(()=>saveLabel('모든 변경사항 저장됨'),250)}
-    function restore(){try{const saved=JSON.parse(localStorage.getItem(docKey())||'null');if(saved)state.pages.forEach((p,i)=>{p.strokes=saved[i]?.strokes||[];p.texts=saved[i]?.texts||[];redraw(p)})}catch{}}
-    async function importPdf(file){if(!file||file.type!=='application/pdf')return toast('PDF 파일을 선택해 주세요.');try{state.fileName=file.name;state.pdfBytes=await file.arrayBuffer();state.pdf=await pdfjsLib.getDocument({data:state.pdfBytes.slice(0)}).promise;state.pages=[];$('document').replaceChildren();$('pageList').replaceChildren();$('empty').hidden=true;$('toolbar').hidden=false;$('zoom').hidden=false;$('fileName').textContent=`${file.name} · ${state.pdf.numPages}페이지`;for(let n=1;n<=state.pdf.numPages;n++)await renderPage(n);restore();saveLabel('PDF 준비됨')}catch(e){console.error(e);toast('PDF를 읽을 수 없습니다.')}}
-    async function renderPage(number,saved={}){const pdfPage=await state.pdf.getPage(number),vp=pdfPage.getViewport({scale:state.zoom}),wrap=document.createElement('section'),pdfCanvas=document.createElement('canvas'),overlay=document.createElement('canvas');wrap.className='page';pdfCanvas.className='pdf-canvas';overlay.className='draw-canvas';pdfCanvas.width=overlay.width=Math.ceil(vp.width);pdfCanvas.height=overlay.height=Math.ceil(vp.height);wrap.append(pdfCanvas,overlay);const page={number,pdfPage,overlay,strokes:saved.strokes||[],texts:saved.texts||[]};state.pages.push(page);$('document').append(wrap);await pdfPage.render({canvasContext:pdfCanvas.getContext('2d'),viewport:vp}).promise;redraw(page);bind(page);const b=document.createElement('button');b.className='page-button';b.innerHTML=`<span class="thumb">${number}</span><span>페이지 ${number}</span>`;b.onclick=()=>wrap.scrollIntoView({behavior:'smooth'});$('pageList').append(b)}
+    function persist(){if(!state.settings.autosave||!state.pdfBytes)return;saveLabel('저장 중...');localStorage.setItem(docKey(),JSON.stringify(annotationsByPage()));setTimeout(()=>saveLabel('모든 변경사항 저장됨'),250)}
+    function restore(){try{const saved=JSON.parse(localStorage.getItem(docKey())||'null');if(saved)state.pages.forEach(p=>{const value=Array.isArray(saved)?saved[p.number-1]:saved[p.number];p.strokes=value?.strokes||[];p.texts=value?.texts||[];redraw(p)})}catch{}}
+    function annotationsByPage(){return Object.fromEntries(state.pages.map(p=>[p.number,{strokes:p.strokes,texts:p.texts}]))}
+    function resetPages(){state.pages=[];$('document').replaceChildren();$('pageList').replaceChildren();}
+    async function importPdf(file){
+      if(!file||file.type!=='application/pdf')return toast('PDF 파일을 선택해 주세요.');
+      const generation=++state.renderGeneration;resetPages();
+      try{
+        state.fileName=file.name;state.pdfBytes=await file.arrayBuffer();
+        const pdf=await pdfjsLib.getDocument({data:state.pdfBytes.slice(0)}).promise;
+        if(generation!==state.renderGeneration)return;
+        state.pdf=pdf;$('empty').hidden=true;$('toolbar').hidden=false;$('zoom').hidden=false;$('fileName').textContent=`${file.name} · ${pdf.numPages}페이지`;
+        await rebuildPages(generation,{});restore();saveLabel('PDF 준비됨');
+      }catch(e){if(generation===state.renderGeneration){console.error(e);toast('PDF를 읽을 수 없습니다.')}}
+    }
+    async function rebuildPages(generation,savedByPage){
+      if(generation!==state.renderGeneration||!state.pdf)return;
+      resetPages();const pageStates=[];
+      for(let number=1;number<=state.pdf.numPages;number++){
+        const page=await createPage(number,savedByPage[number]||{},generation);
+        if(generation!==state.renderGeneration)return;
+        pageStates.push(page);
+      }
+      if(generation!==state.renderGeneration)return;
+      state.pages=pageStates;
+      const doc=$('document');for(const page of state.pages)doc.append(page.wrap);
+      renderPageList(generation);
+    }
+    async function createPage(number,saved={},generation){
+      const pdfPage=await state.pdf.getPage(number);if(generation!==state.renderGeneration)return null;
+      const vp=pdfPage.getViewport({scale:state.zoom}),wrap=document.createElement('section'),pdfCanvas=document.createElement('canvas'),overlay=document.createElement('canvas');
+      wrap.className='page';wrap.dataset.page=String(number);pdfCanvas.className='pdf-canvas';overlay.className='draw-canvas';pdfCanvas.width=overlay.width=Math.ceil(vp.width);pdfCanvas.height=overlay.height=Math.ceil(vp.height);wrap.append(pdfCanvas,overlay);
+      const page={number,pdfPage,wrap,overlay,strokes:saved.strokes||[],texts:saved.texts||[]};
+      await pdfPage.render({canvasContext:pdfCanvas.getContext('2d'),viewport:vp}).promise;
+      if(generation!==state.renderGeneration)return null;
+      redraw(page);bind(page);return page;
+    }
+    function renderPageList(generation){
+      const list=$('pageList');list.replaceChildren();
+      state.pages.forEach(page=>{
+        const button=document.createElement('button');button.className='page-button';button.dataset.page=String(page.number);
+        const thumb=document.createElement('span');thumb.className='thumb';const canvas=document.createElement('canvas');thumb.append(canvas);button.append(thumb,Object.assign(document.createElement('span'),{textContent:`페이지 ${page.number}`}));
+        button.onclick=()=>state.pages.find(p=>p.number===page.number)?.wrap.scrollIntoView({behavior:'smooth',block:'start'});list.append(button);renderThumbnail(page,canvas,generation);
+      });
+    }
+    async function renderThumbnail(page,canvas,generation){
+      try{const vp=page.pdfPage.getViewport({scale:.12});canvas.width=Math.ceil(vp.width);canvas.height=Math.ceil(vp.height);await page.pdfPage.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;if(generation!==state.renderGeneration)canvas.remove()}catch{}
+    }
     const point=(e,p)=>{const r=p.overlay.getBoundingClientRect();return{x:((e.clientX-r.left)*p.overlay.width/r.width)/state.zoom,y:((e.clientY-r.top)*p.overlay.height/r.height)/state.zoom}};
     function bind(page){const c=page.overlay;c.addEventListener('contextmenu',e=>{e.preventDefault();cancelCurrent(page);showRadial(e)});c.addEventListener('pointerdown',e=>startPointer(e,page));c.addEventListener('pointermove',e=>movePointer(e,page));['pointerup','pointercancel','pointerleave'].forEach(t=>c.addEventListener(t,e=>endPointer(e,page)))}
     function capture(e,p){try{p.overlay.setPointerCapture(e.pointerId)}catch{}}function release(e,p){try{if(p.overlay.hasPointerCapture(e.pointerId))p.overlay.releasePointerCapture(e.pointerId)}catch{}}
@@ -65,7 +109,7 @@
     function segmentBox(a,b,box,pad){const samples=Math.max(2,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/4));for(let i=0;i<=samples;i++){const x=a.x+(b.x-a.x)*i/samples,y=a.y+(b.y-a.y)*i/samples;if(x>=box.x-pad&&x<=box.x+box.w+pad&&y>=box.y-pad&&y<=box.y+box.h+pad)return true}return false}const textWidth=t=>Math.max(20,t.text.length*(t.fontSize||18)*.62);
     function clearSelection(p){p.strokes.forEach(s=>s.selected=false);p.texts.forEach(t=>t.selected=false);redraw(p)}function inside(p,poly){let ok=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)ok=!ok}return ok}function selectLasso(p,poly){p.strokes.forEach(s=>{const count=s.points.filter(q=>inside(q,poly)).length;s.selected=count>0&&(count/s.points.length>=.25||s.points.length<4)});p.texts.forEach(t=>t.selected=inside({x:t.x+textWidth(t)/2,y:t.y+(t.fontSize||18)/2},poly));redraw(p)}function moveSelected(p,dx,dy){p.strokes.filter(s=>s.selected).forEach(s=>s.points.forEach(q=>{q.x+=dx;q.y+=dy}));p.texts.filter(t=>t.selected).forEach(t=>{t.x+=dx;t.y+=dy})}
     function drawLasso(p,pts){if(pts.length<2)return;const c=p.overlay.getContext('2d'),z=state.zoom;c.save();c.strokeStyle='#5665e8';c.setLineDash([7,5]);c.lineWidth=2*z;c.beginPath();c.moveTo(pts[0].x*z,pts[0].y*z);pts.slice(1).forEach(q=>c.lineTo(q.x*z,q.y*z));c.stroke();c.restore()}function drawStroke(c,s){const z=state.zoom,p=s.points;if(!p.length)return;c.save();c.strokeStyle=s.color;c.globalAlpha=s.opacity??1;c.lineCap='round';c.lineJoin='round';c.lineWidth=s.width*z;c.beginPath();c.moveTo(p[0].x*z,p[0].y*z);for(let i=1;i<p.length-1;i++)c.quadraticCurveTo(p[i].x*z,p[i].y*z,(p[i].x+p[i+1].x)*z/2,(p[i].y+p[i+1].y)*z/2);if(p.length===2)c.lineTo(p[1].x*z,p[1].y*z);c.stroke();if(s.selected){c.globalAlpha=1;c.strokeStyle='#5665e8';c.lineWidth+=4*z;c.stroke()}c.restore()}function redraw(p,preview){const c=p.overlay.getContext('2d'),z=state.zoom;c.clearRect(0,0,p.overlay.width,p.overlay.height);p.strokes.forEach(s=>drawStroke(c,s));if(preview)drawStroke(c,preview);c.textBaseline='top';p.texts.forEach(t=>{c.fillStyle=t.color;c.globalAlpha=1;c.font=`600 ${(t.fontSize||18)*z}px sans-serif`;c.fillText(t.text,t.x*z,t.y*z);if(t.selected){c.strokeStyle='#5665e8';c.lineWidth=2*z;c.strokeRect(t.x*z-3*z,t.y*z-3*z,textWidth(t)*z+6*z,(t.fontSize||18)*z+6*z)}})}
-    async function setZoom(z){if(!state.pdf)return;z=Math.max(.6,Math.min(3,z));if(z===state.zoom)return;const saved=state.pages.map(p=>({strokes:p.strokes,texts:p.texts}));state.zoom=z;$('zoomLabel').textContent=`${Math.round(z*100)}%`;$('document').replaceChildren();$('pageList').replaceChildren();state.pages=[];for(let i=1;i<=state.pdf.numPages;i++)await renderPage(i,saved[i-1])}
+    async function setZoom(z){if(!state.pdf)return;z=Math.max(.6,Math.min(3,z));if(z===state.zoom)return;const saved=annotationsByPage(),generation=++state.renderGeneration;state.zoom=z;$('zoomLabel').textContent=`${Math.round(z*100)}%`;await rebuildPages(generation,saved)}
     async function exportPdf(){if(!state.pdfBytes)return toast('먼저 PDF를 가져와 주세요.');try{const out=await PDFLib.PDFDocument.load(state.pdfBytes),pages=out.getPages();for(const p of state.pages){const data=await new Promise(r=>p.overlay.toBlob(b=>{const f=new FileReader();f.onload=()=>r(f.result);f.readAsDataURL(b)},'image/png'));const img=await out.embedPng(data),target=pages[p.number-1],size=target.getSize();target.drawImage(img,{x:0,y:0,width:size.width,height:size.height})}const bytes=await out.save(),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));a.download=state.fileName.replace(/\.pdf$/i,'')+'-annotated.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500)}catch(e){console.error(e);toast('PDF 저장에 실패했습니다.')}}
     function showPresets(tool,anchor){const box=$('presetPopover'),items=state.presets.filter(p=>p.tool===tool);box.replaceChildren(...items.map(p=>{const b=document.createElement('button');b.className='preset-dot'+(p.id===state.activePresetId?' active':'');b.style.background=p.color;b.title=p.name;b.onclick=()=>{applyPreset(p);box.hidden=true};return b}));const r=anchor.getBoundingClientRect();box.style.left=`${r.left+r.width/2}px`;box.style.top=`${r.bottom+8}px`;box.style.transform='translateX(-50%)';box.hidden=false}
     function showRadial(e){const r=$('radial');r.style.left=`${e.clientX}px`;r.style.top=`${e.clientY}px`;r.classList.add('open')}function renderPresetManager(){const root=$('presetRows');root.replaceChildren(...state.presets.map(p=>{const row=document.createElement('div');row.className='setting';row.innerHTML=`<div><strong>${p.name}</strong><small>${p.tool==='pen'?'펜':'형광펜'} · ${p.width}px · ${Math.round(p.opacity*100)}%</small></div>`;const edit=document.createElement('button');edit.className='header-button';edit.textContent='✎';edit.onclick=()=>editPreset(p);row.append(edit);if(!p.base){const del=document.createElement('button');del.className='close';del.textContent='×';del.onclick=()=>{state.presets=state.presets.filter(x=>x.id!==p.id);savePresets();renderPresetManager()};row.append(del)}return row}))}function editPreset(p){const name=prompt('이름',p.name);if(!name)return;const color=prompt('색상 HEX',p.color)||p.color,width=Number(prompt('굵기',p.width)||p.width),opacity=Number(prompt('불투명도 (0~1)',p.opacity)||p.opacity);Object.assign(p,{name,color,width,opacity:Math.max(0,Math.min(1,opacity))});savePresets();renderPresetManager()}function addPreset(){const tool=confirm('확인을 누르면 펜, 취소를 누르면 형광펜입니다.')?'pen':'highlighter';const p={id:`custom-${Date.now()}`,name:'새 프리셋',tool,color:'#5665e8',width:tool==='pen'?3:14,opacity:tool==='pen'?1:.35};state.presets.push(p);editPreset(p);savePresets();renderPresetManager()}
