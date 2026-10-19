@@ -44,6 +44,9 @@
     <symbol id="i-fold" viewBox="0 0 24 24"><path d="M4.5 4.5h15v10l-5 5h-10z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 10.5l4 3 4-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4.8 7.2l1.3 1.3 2.4-2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="14" width="6" height="6" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12.5 7h8M12.5 17h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15M15 4.5v15" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7" y="5.5" width="3.6" height="13" rx="1" fill="currentColor"/><rect x="13.4" y="5.5" width="3.6" height="13" rx="1" fill="currentColor"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></symbol>
   </defs>
 </svg>
@@ -78,6 +81,7 @@
       <div class="doc-title" id="docTitle"></div>
     </div>
     <div class="tb-right">
+      <button class="rec-chip" id="recChip" hidden title="녹음 중 — 눌러서 녹음 패널"><i></i><span>0:00</span></button>
       <button class="save-state" id="saveState" data-state="saved"><i></i><span>저장됨</span></button>
       <div class="zoom-ctl">
         <button class="icon-btn sm" id="btnZoomOut" title="축소"><svg><use href="#i-minus"/></svg></button>
@@ -86,6 +90,7 @@
       </div>
       <button class="page-ind" id="pageInd">1 / 1</button>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
+      <button class="icon-btn" id="btnRec" title="음성 녹음"><svg><use href="#i-mic"/></svg></button>
       <button class="icon-btn" id="btnExport" title="PDF 내보내기"><svg><use href="#i-export"/></svg></button>
       <button class="icon-btn" id="btnSettings" title="설정"><svg><use href="#i-gear"/></svg></button>
     </div>
@@ -160,6 +165,40 @@
   </nav>
 
   <div id="toolPopup" class="popup tool-popup" data-ui hidden></div>
+  <div id="audioPanel" class="popup audio-panel" data-ui hidden>
+    <div class="ap-head">
+      <b>음성 녹음</b>
+      <button class="icon-btn sm" id="apClose" title="닫기"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="ap-rec">
+      <button class="btn primary" id="apRecBtn"><svg><use href="#i-mic"/></svg><span>녹음 시작</span></button>
+      <label class="ap-stt"><input type="checkbox" id="apStt" checked> 받아쓰기</label>
+      <span class="muted small" id="apRecInfo"></span>
+    </div>
+    <div class="ap-interim muted small" id="apInterim"></div>
+    <div class="ap-list" id="apList"></div>
+    <div class="ap-player" id="apPlayer" hidden>
+      <div class="ap-title" id="apTitle"></div>
+      <div class="ap-ctrl">
+        <button class="icon-btn" id="apPlay" title="재생/일시정지"><svg><use href="#i-play"/></svg></button>
+        <span class="ap-time" id="apTime">0:00 / 0:00</span>
+        <input type="range" id="apSeek" min="0" max="1000" value="0">
+        <select id="apSpeed" title="재생 속도"><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option></select>
+      </div>
+      <div class="ap-opts">
+        <label><input type="checkbox" id="apFollowInk" checked> 필기 따라가기</label>
+        <label><input type="checkbox" id="apFollowPage" checked> 페이지 따라가기</label>
+      </div>
+      <div class="ap-transcript" id="apTranscript"></div>
+      <div class="ap-actions">
+        <button class="btn sm" id="apInsertText">받아쓴 글을 포스트잇으로</button>
+        <button class="btn sm" id="apDownload">파일 저장</button>
+        <button class="btn sm danger" id="apDelete">삭제</button>
+      </div>
+      <p class="muted small" style="margin:6px 0 0">손가락으로 필기를 탭하면 그 필기를 쓰던 순간부터 재생합니다.</p>
+    </div>
+    <audio id="apAudio" preload="metadata"></audio>
+  </div>
   <div id="quickMenu" class="popup quick-menu" data-ui hidden>
     <div class="qm-tools">
       <button data-tool="pen" title="펜"><svg><use href="#i-pen"/></svg></button>

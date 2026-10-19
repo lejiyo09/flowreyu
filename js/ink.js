@@ -684,6 +684,11 @@ export function transformItem(item, m) {
 const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
 const fin = (v) => typeof v === 'number' && Number.isFinite(v);
 
+/** 녹음 시각 표시 {rec, t} 검증 (녹음 재생 시 필기 따라가기용) */
+function cleanRt(rt) {
+  return rt && typeof rt.rec === 'string' && fin(rt.t) ? { rt: { rec: rt.rec, t: rt.t } } : {};
+}
+
 /** 저장소에서 읽은 객체 검증. 잘못된 객체는 null */
 export function sanitizeItem(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.t !== 'string') return null;
@@ -693,16 +698,16 @@ export function sanitizeItem(raw) {
     if (!Array.isArray(raw.pts) || raw.pts.length < 3 || raw.pts.length % 3 !== 0) return null;
     if (!raw.pts.every(fin)) return null;
     if (!fin(raw.w) || raw.w <= 0) return null;
-    return { id, t: 's', tool: raw.tool === 'hl' ? 'hl' : 'pen', c, w: raw.w, pr: !!raw.pr, pts: raw.pts };
+    return { id, t: 's', tool: raw.tool === 'hl' ? 'hl' : 'pen', c, w: raw.w, pr: !!raw.pr, pts: raw.pts, ...cleanRt(raw.rt) };
   }
   if (raw.t === 'sh') {
     if (!['line', 'arrow', 'rect', 'ellipse'].includes(raw.kind)) return null;
     if (![raw.x1, raw.y1, raw.x2, raw.y2, raw.w].every(fin)) return null;
-    return { id, t: 'sh', kind: raw.kind, c, w: raw.w, x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2 };
+    return { id, t: 'sh', kind: raw.kind, c, w: raw.w, x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2, ...cleanRt(raw.rt) };
   }
   if (raw.t === 'tx') {
     if (![raw.x, raw.y, raw.fs].every(fin) || typeof raw.text !== 'string') return null;
-    return { id, t: 'tx', x: raw.x, y: raw.y, c, fs: raw.fs, text: raw.text };
+    return { id, t: 'tx', x: raw.x, y: raw.y, c, fs: raw.fs, text: raw.text, ...cleanRt(raw.rt) };
   }
   if (raw.t === 'im') {
     if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0 || typeof raw.blob !== 'string') return null;

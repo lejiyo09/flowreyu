@@ -25,6 +25,7 @@ export const GESTURE_ACTIONS = [
   ['insertNote', '포스트잇 붙이기'],
   ['insertChecklist', '체크리스트 넣기'],
   ['insertTable', '표 넣기'],
+  ['toggleRecord', '녹음 시작/정지'],
   ['toggleFinger', '손가락 쓰기 켜기/끄기'],
   ['toggleRuler', '자 켜기/끄기'],
   ['toggleProt', '각도기 켜기/끄기'],

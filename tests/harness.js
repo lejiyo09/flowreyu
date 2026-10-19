@@ -1,7 +1,7 @@
 const { chromium } = require('playwright');
 const S = __dirname + '/fixtures';
 exports.launch = async (opts = {}) => {
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || undefined, args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream', '--autoplay-policy=no-user-gesture-required'] });
   const context = await browser.newContext({ viewport: opts.viewport || { width: 1200, height: 860 }, deviceScaleFactor: opts.dpr || 2, hasTouch: true, isMobile: false });
   const page = await context.newPage();
   const logs = [];

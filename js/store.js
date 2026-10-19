@@ -144,6 +144,19 @@ export async function putBlob(rec) {
   return tx2p(tx);
 }
 
+/** 문서의 첨부 목록 (kind: 'audio' 등). Blob 내용은 필요할 때만 읽힌다 */
+export async function listBlobs(docId, kind) {
+  const tx = await store('blobs');
+  const all = await req2p(tx.objectStore('blobs').index('byDoc').getAll(IDBKeyRange.only(docId)));
+  return all.filter((r) => !kind || r.kind === kind);
+}
+
+export async function deleteBlob(id) {
+  const tx = await store('blobs', 'readwrite');
+  tx.objectStore('blobs').delete(id);
+  return tx2p(tx);
+}
+
 export async function getBlob(id) {
   const tx = await store('blobs');
   return req2p(tx.objectStore('blobs').get(id));

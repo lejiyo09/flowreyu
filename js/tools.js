@@ -66,7 +66,9 @@ export class ToolController {
     guides?.penAt(ev.sx, ev.sy);
     const hit = this.viewer.pageAtScreen(ev.sx, ev.sy);
     if (!hit) return;
-    this.cur = { tool, name, override: !!ev.toolOverride, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy };
+    // 녹음 중이면 이 획을 쓰기 시작한 녹음 시각 (재생할 때 필기 따라가기)
+    const rt = this.app.recStamp?.() || null;
+    this.cur = { tool, name, override: !!ev.toolOverride, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy, rt };
     tool.begin(this.cur, ev);
   }
 
@@ -293,7 +295,7 @@ class PenTool {
     const v = this.ctl.viewer;
     if (c.pts.length) {
       const pts = roundPts(c.pts.length > 9 ? simplifyPts(c.pts, 0.04) : c.pts);
-      const item = { id: uid('s'), t: 's', tool: this.kind, c: c.color, w: c.width, pr: c.pr, pts };
+      const item = { id: uid('s'), t: 's', tool: this.kind, c: c.color, w: c.width, pr: c.pr, pts, ...(c.rt ? { rt: c.rt } : {}) };
       // 문서 변경 이벤트에서 새 획만 덧그린다 (전체 다시 그리기 없음) → 그 뒤 라이브 레이어 지움
       this.ctl.doc.add(c.page, item);
     }
@@ -560,7 +562,7 @@ class ShapeTool {
   }
 
   shape(c) {
-    return { id: uid('sh'), t: 'sh', kind: c.kind, c: c.color, w: c.width, x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2 };
+    return { id: uid('sh'), t: 'sh', kind: c.kind, c: c.color, w: c.width, x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2, ...(c.rt ? { rt: c.rt } : {}) };
   }
 
   draw(c) {

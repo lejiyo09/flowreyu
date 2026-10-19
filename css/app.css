@@ -370,3 +370,28 @@ input[type=range] { accent-color: var(--accent); }
 }
 .text-editor.note-editor { white-space: pre-wrap; overflow-y: auto; background: transparent; border: 1.5px dashed rgba(0,0,0,0.25); word-break: break-word; }
 .sel-menu button.txt { width: auto; padding: 0 8px; font-size: 13px; font-weight: 700; color: var(--accent); }
+
+/* ── 음성 녹음 ── */
+.rec-chip { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; padding: 5px 10px; background: rgba(229,72,77,0.12); color: var(--danger); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.rec-chip i { width: 9px; height: 9px; border-radius: 50%; background: var(--danger); animation: pulse 0.9s infinite alternate; }
+.audio-panel { right: 12px; top: calc(var(--top-h) + env(safe-area-inset-top) + 8px); width: min(380px, calc(100vw - 16px)); max-height: calc(100vh - var(--top-h) - 120px); display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.ap-head { display: flex; align-items: center; justify-content: space-between; }
+.ap-rec { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ap-rec .btn.recording { background: var(--danger); border-color: var(--danger); }
+.ap-stt { font-size: 13px; display: inline-flex; align-items: center; gap: 4px; }
+.ap-interim { min-height: 1em; font-style: italic; }
+.ap-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 160px; }
+.ap-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); border: 0; text-align: left; font-size: 13px; }
+.ap-item.on { outline: 2px solid var(--accent); }
+.ap-player { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--line); padding-top: 8px; min-height: 0; }
+.ap-title { font-weight: 700; font-size: 13px; }
+.ap-ctrl { display: flex; align-items: center; gap: 6px; }
+.ap-ctrl input[type=range] { flex: 1; min-width: 60px; accent-color: var(--accent); }
+.ap-time { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ap-ctrl select { height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); }
+.ap-opts { display: flex; gap: 14px; font-size: 13px; }
+.ap-transcript { overflow-y: auto; max-height: 180px; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.ap-transcript button { text-align: left; border: 0; background: none; padding: 4px 6px; border-radius: 6px; line-height: 1.4; }
+.ap-transcript button b { color: var(--accent); font-weight: 600; margin-right: 6px; font-variant-numeric: tabular-nums; }
+.ap-transcript button.now { background: var(--accent-soft); }
+.ap-actions { display: flex; gap: 6px; flex-wrap: wrap; }

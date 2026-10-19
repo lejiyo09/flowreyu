@@ -583,6 +583,15 @@ export class Viewer extends Emitter {
       for (const it of items) {
         if (this.hidden && this.hidden.has(it.id)) continue;
         if (folded && folded.has(it.id)) continue;
+        // 녹음 재생 중: 재생 위치보다 나중에 쓴 필기는 흐리게
+        const later = this.replay && it.rt && it.rt.rec === this.replay.rec && it.rt.t > this.replay.t;
+        if (later) {
+          const ctx = isHighlighter(it) ? hl : ink;
+          ctx.globalAlpha = 0.14;
+          drawItem(ctx, it);
+          ctx.globalAlpha = 1;
+          continue;
+        }
         const ctx = isHighlighter(it) ? hl : ink;
         const moving = sel && sel.page === p.index && sel.ids.has(it.id) && sel.m;
         if (moving) {
@@ -606,7 +615,7 @@ export class Viewer extends Emitter {
 
   /** 새 객체 하나만 현재 화면에 덧그린다. 전체 다시 그리기가 필요한 상태면 false */
   appendItem(page, item) {
-    if (this._inkFrame || this.selection?.m || this.hidden || this.inkOffset) return false;
+    if (this._inkFrame || this.selection?.m || this.hidden || this.inkOffset || this.replay) return false;
     const p = this.pages[page];
     if (!p) return false;
     const ctx = isHighlighter(item) ? this.hlCtx : this.inkCtx;

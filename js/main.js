@@ -7,9 +7,10 @@ import { InputRouter } from './input.js';
 import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
+import { AudioRecorder, fmtTime } from './audio.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -272,6 +273,8 @@ $('#newNoteDlg').addEventListener('close', async () => {
 // ───────────────────────────── 문서 열기 / 닫기 ─────────────────────────────
 
 async function closeDoc() {
+  if (recorder.recording) await stopRecording(); // 녹음 중이면 먼저 저장
+  stopPlayback(true);
   commitTextEdit();
   tools.cancel();
   tools.clearSelection();
@@ -758,6 +761,231 @@ $('#viewport').addEventListener('drop', (e) => {
   insertImageFile(f, viewer.clientToScreen(e.clientX, e.clientY));
 });
 
+// ───────────────────────────── 음성 녹음 · 필기 따라가기 ─────────────────────────────
+
+const recorder = new AudioRecorder();
+app.recStamp = () => recorder.stamp();
+const audioEl = $('#apAudio');
+let player = null; // {rec(저장 레코드), url, marks:[{page, t}]}
+let recTimer = 0, playRaf = 0, lastFollow = 0;
+
+function openAudioPanel() {
+  closeToolPopup();
+  $('#audioPanel').hidden = false;
+  renderRecList();
+}
+$('#btnRec').addEventListener('click', () => { if ($('#audioPanel').hidden) openAudioPanel(); else $('#audioPanel').hidden = true; });
+$('#recChip').addEventListener('click', openAudioPanel);
+$('#apClose').addEventListener('click', () => { $('#audioPanel').hidden = true; stopPlayback(); });
+$('#apRecBtn').addEventListener('click', () => toggleRecording());
+
+async function toggleRecording() {
+  if (!state.doc) return;
+  if (recorder.recording) { await stopRecording(); return; }
+  try {
+    await recorder.start({ stt: $('#apStt').checked });
+  } catch (e) {
+    const why = e?.name === 'NotAllowedError' ? '마이크 권한이 거부되었습니다' : e?.name === 'NotFoundError' ? '마이크를 찾을 수 없습니다' : (e?.message || e);
+    toast('녹음을 시작할 수 없습니다: ' + why, { error: true, ms: 5000 });
+    return;
+  }
+  stopPlayback(true);
+  const btn = $('#apRecBtn');
+  btn.classList.add('recording');
+  btn.querySelector('span').textContent = '녹음 정지';
+  $('#recChip').hidden = false;
+  $('#btnRec').classList.add('on');
+  const tick = () => {
+    const t = fmtTime(recorder.elapsed());
+    $('#recChip span').textContent = t;
+    $('#apRecInfo').textContent = `녹음 중 ${t} · 지금 쓰는 필기가 녹음과 연결됩니다`;
+  };
+  tick();
+  recTimer = setInterval(tick, 500);
+  toast('녹음을 시작했습니다', { ms: 1200 });
+}
+
+async function stopRecording() {
+  clearInterval(recTimer);
+  const r = await recorder.stop();
+  const btn = $('#apRecBtn');
+  btn.classList.remove('recording');
+  btn.querySelector('span').textContent = '녹음 시작';
+  $('#recChip').hidden = true;
+  $('#btnRec').classList.remove('on');
+  $('#apInterim').textContent = '';
+  $('#apRecInfo').textContent = '';
+  if (!r || !state.doc) return;
+  try {
+    const name = `녹음 ${formatDate(r.created)}`;
+    await store.putBlob({ id: r.id, docId: state.doc.id, kind: 'audio', data: r.blob, duration: r.duration, mime: r.mime, created: r.created, segments: r.segments, name });
+    toast(`녹음을 저장했습니다 (${fmtTime(r.duration)})`);
+    if (!$('#audioPanel').hidden) { await renderRecList(); loadRecording(r.id); }
+  } catch (e) {
+    toast('녹음을 저장하지 못했습니다: ' + store.describeError(e), { error: true, ms: 6000 });
+  }
+}
+
+recorder.on('interim', ({ text }) => { $('#apInterim').textContent = text; });
+recorder.on('transcript', ({ segments }) => { $('#apInterim').textContent = '✓ ' + segments[segments.length - 1].text; });
+recorder.on('stt', ({ available, error }) => {
+  if (!available) $('#apInterim').textContent = '이 브라우저는 받아쓰기를 지원하지 않아 녹음만 합니다';
+  else if (error === 'not-allowed') $('#apInterim').textContent = '받아쓰기 권한이 없어 녹음만 합니다';
+  else if (error === 'network') $('#apInterim').textContent = '받아쓰기는 인터넷이 필요합니다 (녹음은 계속됨)';
+});
+
+async function renderRecList() {
+  const box = $('#apList');
+  box.innerHTML = '';
+  if (!state.doc) return;
+  const list = (await store.listBlobs(state.doc.id, 'audio').catch(() => [])).sort((a, b) => b.created - a.created);
+  if (!list.length) { box.innerHTML = '<p class="muted small" style="margin:0">아직 녹음이 없습니다. 녹음하면서 쓴 필기는 재생할 때 녹음에 맞춰 나타납니다.</p>'; return; }
+  for (const r of list) {
+    const b = document.createElement('button');
+    b.className = 'ap-item' + (player?.rec.id === r.id ? ' on' : '');
+    b.innerHTML = `<span>🎙 ${escapeHtml(r.name || '녹음')}</span><span class="muted">${fmtTime(r.duration)}${r.segments?.length ? ' · 받아쓰기' : ''}</span>`;
+    b.addEventListener('click', () => loadRecording(r.id));
+    box.appendChild(b);
+  }
+}
+
+/** 이 녹음과 연결된 필기 위치 목록 (시간순) */
+function recMarks(recId) {
+  const marks = [];
+  for (const [page, items] of state.doc.pages) for (const it of items) if (it.rt?.rec === recId) marks.push({ page, t: it.rt.t });
+  return marks.sort((a, b) => a.t - b.t);
+}
+
+async function loadRecording(id) {
+  const rec = await store.getBlob(id);
+  if (!rec) return;
+  stopPlayback(true);
+  const url = URL.createObjectURL(rec.data);
+  audioEl.src = url;
+  audioEl.playbackRate = +$('#apSpeed').value;
+  player = { rec, url, marks: recMarks(id) };
+  $('#apPlayer').hidden = false;
+  $('#apTitle').textContent = `${rec.name || '녹음'} · 연결된 필기 ${player.marks.length}개`;
+  renderTranscript();
+  renderRecList();
+  setReplayTime(0);
+  updatePlayUi();
+}
+
+const recDuration = () => (player ? (Number.isFinite(audioEl.duration) && audioEl.duration > 0 ? audioEl.duration * 1000 : player.rec.duration) : 0);
+
+function setReplayTime(t) {
+  if (!player) return;
+  viewer.replay = $('#apFollowInk').checked ? { rec: player.rec.id, t } : null;
+  viewer.requestInk();
+  const dur = recDuration();
+  $('#apTime').textContent = `${fmtTime(t)} / ${fmtTime(dur)}`;
+  $('#apSeek').value = dur ? Math.round((t / dur) * 1000) : 0;
+  // 받아쓰기 현재 문장 표시
+  const segs = player.rec.segments || [];
+  let cur = -1;
+  for (let i = 0; i < segs.length; i++) if (segs[i].t <= t) cur = i;
+  $('#apTranscript').querySelectorAll('button').forEach((b, i) => b.classList.toggle('now', i === cur));
+  // 페이지 따라가기: 지금까지 쓴 마지막 필기의 페이지가 안 보이면 이동
+  if ($('#apFollowPage').checked && !audioEl.paused && performance.now() - lastFollow > 600) {
+    lastFollow = performance.now();
+    let last = null;
+    for (const m of player.marks) { if (m.t <= t) last = m; else break; }
+    if (last && !viewer.visiblePages().some((p) => p.index === last.page)) viewer.goToPage(last.page);
+  }
+}
+
+function playLoop() {
+  if (!player) return;
+  setReplayTime(audioEl.currentTime * 1000);
+  if (!audioEl.paused) playRaf = requestAnimationFrame(playLoop);
+}
+
+function updatePlayUi() { $('#apPlay use').setAttribute('href', audioEl.paused ? '#i-play' : '#i-pause'); }
+
+function seekTo(ms, play) {
+  if (!player) return;
+  audioEl.currentTime = Math.max(0, ms) / 1000;
+  setReplayTime(Math.max(0, ms));
+  if (play) audioEl.play().catch(() => {});
+}
+
+/** 재생 중 필기를 탭하면 그 필기를 쓰던 순간(조금 앞)부터 재생 */
+function seekToInkAt(page, x, y) {
+  const items = state.doc.items(page);
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.rt?.rec === player.rec.id && hitTest(it, x, y, 10 / viewer.cam.z)) { seekTo(it.rt.t - 800, true); return true; }
+  }
+  return false;
+}
+
+/** 재생 멈춤. full=true 면 불러온 녹음도 내리고 필기를 원래대로 */
+function stopPlayback(full = true) {
+  cancelAnimationFrame(playRaf);
+  audioEl.pause();
+  if (full) {
+    if (player?.url) URL.revokeObjectURL(player.url);
+    player = null;
+    audioEl.removeAttribute('src');
+    $('#apPlayer').hidden = true;
+    if (viewer.replay) { viewer.replay = null; viewer.requestInk(); }
+  }
+  updatePlayUi();
+}
+
+$('#apPlay').addEventListener('click', () => {
+  if (!player) return;
+  if (audioEl.paused) audioEl.play().catch((e) => toast('재생할 수 없습니다: ' + e.message, { error: true })); else audioEl.pause();
+});
+audioEl.addEventListener('play', () => { updatePlayUi(); cancelAnimationFrame(playRaf); playRaf = requestAnimationFrame(playLoop); });
+audioEl.addEventListener('pause', () => { updatePlayUi(); setReplayTime(audioEl.currentTime * 1000); });
+audioEl.addEventListener('ended', () => { updatePlayUi(); setReplayTime(recDuration()); });
+$('#apSeek').addEventListener('input', (e) => seekTo((+e.target.value / 1000) * recDuration(), false));
+$('#apSpeed').addEventListener('change', (e) => { audioEl.playbackRate = +e.target.value; });
+$('#apFollowInk').addEventListener('change', () => setReplayTime(audioEl.currentTime * 1000));
+
+function renderTranscript() {
+  const box = $('#apTranscript');
+  box.innerHTML = '';
+  const segs = player?.rec.segments || [];
+  $('#apInsertText').disabled = !segs.length;
+  if (!segs.length) { box.innerHTML = '<p class="muted small" style="margin:0">받아쓴 글이 없습니다.</p>'; return; }
+  segs.forEach((sg) => {
+    const b = document.createElement('button');
+    b.innerHTML = `<b>${fmtTime(sg.t)}</b>${escapeHtml(sg.text)}`;
+    b.addEventListener('click', () => seekTo(sg.t, true));
+    box.appendChild(b);
+  });
+}
+
+$('#apInsertText').addEventListener('click', () => {
+  const segs = player?.rec.segments || [];
+  if (!segs.length || !state.doc) return;
+  const text = segs.map((s) => `[${fmtTime(s.t)}] ${s.text}`).join('\n');
+  const hit = placeAt(), p = viewer.pages[hit.page], z = viewer.cam.z;
+  const w = Math.min(300 / z, p.w * 0.8), fs = 13 / z;
+  const h = Math.min(Math.max(120 / z, (segs.length * 2 + 2) * fs * 1.3), p.h * 0.8);
+  const item = { id: uid('nt'), t: 'nt', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, 0, p.h - h), w, h, c: '#b3e5fc', fs, text };
+  state.doc.add(hit.page, item);
+  toast('받아쓴 글을 포스트잇으로 붙였습니다');
+});
+$('#apDownload').addEventListener('click', () => {
+  if (!player) return;
+  const ext = /mp4/.test(player.rec.mime) ? 'm4a' : /ogg/.test(player.rec.mime) ? 'ogg' : 'webm';
+  const a = document.createElement('a');
+  a.href = player.url;
+  a.download = `${state.doc?.meta.name || '노트'}_${player.rec.name || '녹음'}.${ext}`.replace(/[\\/:*?"<>|]/g, '_');
+  a.click();
+});
+$('#apDelete').addEventListener('click', async () => {
+  if (!player || !confirm('이 녹음을 삭제할까요? (필기는 그대로 남습니다)')) return;
+  const id = player.rec.id;
+  stopPlayback(true);
+  await store.deleteBlob(id).catch(() => {});
+  renderRecList();
+});
+
 // ───────────────────────────── 링크 ─────────────────────────────
 
 let backAnchor = null;
@@ -766,6 +994,7 @@ async function followLinkAt(sx, sy) {
   const hit = viewer.pageAtScreen(sx, sy, true);
   if (!hit) return;
   if (tapObjectAt(hit.page, hit.x, hit.y)) return; // 손가락 탭으로도 포스트잇 접기/펼치기·체크
+  if (player && seekToInkAt(hit.page, hit.x, hit.y)) return; // 녹음 재생 중: 탭한 필기를 쓰던 순간으로
   const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
   const items = state.doc.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
@@ -1115,6 +1344,7 @@ function runAction(action, sx, sy, source) {
     case 'insertNote': insertNote({ x: sx, y: sy }); break;
     case 'insertChecklist': insertChecklist({ x: sx, y: sy }); break;
     case 'insertTable': $('#tableDlg').showModal(); break;
+    case 'toggleRecord': toggleRecording(); break;
     case 'toggleFinger': $('#btnFinger').click(); break;
     case 'toggleRuler': $('#btnRuler').click(); break;
     case 'toggleProt': $('#btnProt').click(); break;
@@ -1268,7 +1498,7 @@ function startTextEdit(page, item, x, y, opts = {}) {
   commitTextEdit();
   const cfg = settings.get('text');
   let ed;
-  if (!item) ed = { kind: 'text', page, item: null, x, y: y - cfg.size * 0.65, fs: cfg.size, c: cfg.color };
+  if (!item) ed = { kind: 'text', page, item: null, x, y: y - cfg.size * 0.65, fs: cfg.size, c: cfg.color, rt: recorder.stamp() };
   else if (item.t === 'nt') ed = { kind: 'note', page, item, fs: item.fs, c: '#2b2b2b' };
   else if (item.t === 'cl') ed = { kind: 'check', page, item, fs: item.fs, c: item.c, isNew: !!opts.isNew };
   else if (item.t === 'tb') {
@@ -1395,7 +1625,7 @@ function commitTextEdit({ keepFocus = false } = {}) {
     if (!text) doc.setItems(ed.page, items.filter((i) => i.id !== ed.item.id));
     else if (cur && text !== cur.text) replace((i) => ({ ...i, text }));
   } else if (text) {
-    doc.add(ed.page, { id: uid('tx'), t: 'tx', x: ed.x, y: ed.y, c: ed.c, fs: ed.fs, text });
+    doc.add(ed.page, { id: uid('tx'), t: 'tx', x: ed.x, y: ed.y, c: ed.c, fs: ed.fs, text, ...(ed.rt ? { rt: ed.rt } : {}) });
   }
   viewer.requestInk();
 }
