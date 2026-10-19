@@ -469,7 +469,7 @@ class TouchInput {
 
   active() {
     const out = [];
-    for (const [id, t] of this.touches) if (!t.rejected) out.push([id, t]);
+    for (const [id, t] of this.touches) if (!t.rejected && !t.guide) out.push([id, t]);
     return out;
   }
 
@@ -494,6 +494,8 @@ class TouchInput {
     this.touches.set(e.pointerId, t);
     if (!this.gesture) this.gesture = { t0: now(), cam0: { ...r.viewer.cam }, maxCount: 0, moved: false, rejectedAny: false };
     if (t.rejected) { this.gesture.rejectedAny = true; r.trace(`손가락 ${e.pointerId} 거부: ${reason}`); return; }
+    // 자/각도기 위에 닿은 손가락은 화면 대신 도구를 옮긴다
+    if (r.app.guides?.grab(e.pointerId, s.x, s.y)) { t.guide = true; this.gesture.rejectedAny = true; this.rebase(); return; }
 
     // 손가락 필기 모드
     if (settings.get('fingerDraw')) {
@@ -525,6 +527,7 @@ class TouchInput {
   onMove(e) {
     const t = this.touches.get(e.pointerId);
     if (!t || t.rejected) return;
+    if (t.guide) { this.r.app.guides?.move(e.pointerId, t.x, t.y); return; }
     // 이동 중 접촉면이 커지면(손바닥이 눕는 경우) 그때라도 제외
     if (this.isPalm(e)) { t.rejected = true; t.reason = 'palm-size'; if (this.gesture) this.gesture.rejectedAny = true; this.rebase(); return; }
     if (this.gesture && dist(t.x0, t.y0, t.x, t.y) > 10) this.gesture.moved = true;
@@ -537,6 +540,7 @@ class TouchInput {
     if (this.fingerInk === e.pointerId) this.fingerInk = null;
     if (!t) return;
     this.touches.delete(e.pointerId);
+    if (t.guide) this.r.app.guides?.release(e.pointerId);
     if (this.touches.size === 0) {
       const g = this.gesture;
       this.gesture = null;
@@ -604,13 +608,14 @@ class TouchInput {
 
   rejectAll(reason) {
     if (!this.touches.size) return;
+    for (const [id, t] of this.touches) if (t.guide) this.r.app.guides?.release(id);
     for (const t of this.touches.values()) if (!t.rejected) { t.rejected = true; t.reason = reason; }
     if (this.gesture) this.gesture.rejectedAny = true;
     this.base = null;
   }
 
   /** 실제로는 손가락이 하나도 없는데 기록만 남은 경우 */
-  clearStale() { this.touches.clear(); this.base = null; this.gesture = null; this.fingerInk = null; }
+  clearStale() { for (const id of this.touches.keys()) this.r.app.guides?.release(id); this.touches.clear(); this.base = null; this.gesture = null; this.fingerInk = null; }
 
   startInertia() {
     if (!settings.get('inertia') || this.vel.length < 2) return;
@@ -650,6 +655,10 @@ class MouseInput {
 
   onDown(e) {
     const r = this.r;
+    if (e.button === 0) {
+      const s = r.screen(e);
+      if (r.app.guides?.grab(e.pointerId, s.x, s.y)) { this.guide = e.pointerId; try { r.el.setPointerCapture(e.pointerId); } catch { /* */ } return; }
+    }
     if (e.button === 0 && settings.get('mouseDraw')) { r.pen.onDown(e, 'mouse'); return; }
     if (e.button === 0 || e.button === 1) {
       const s = r.screen(e);
@@ -659,13 +668,17 @@ class MouseInput {
   }
 
   onMove(e) {
+    if (this.guide === e.pointerId) { const s = this.r.screen(e); this.r.app.guides?.move(e.pointerId, s.x, s.y); return; }
     if (!this.pan || this.pan.id !== e.pointerId) return;
     const s = this.r.screen(e);
     const c = this.pan.cam;
     this.r.viewer.setCamera(c.tx + s.x - this.pan.x, c.ty + s.y - this.pan.y, c.z);
   }
 
-  onUp(e) { if (this.pan && this.pan.id === e.pointerId) this.pan = null; }
+  onUp(e) {
+    if (this.guide === e.pointerId) { this.r.app.guides?.release(e.pointerId); this.guide = null; }
+    if (this.pan && this.pan.id === e.pointerId) this.pan = null;
+  }
 
   onWheel(e) {
     if (this.r.app.isUiTarget(e.target)) return;
@@ -682,5 +695,5 @@ class MouseInput {
     }
   }
 
-  reset() { this.pan = null; }
+  reset() { this.pan = null; if (this.guide != null) this.r.app.guides?.release(this.guide); this.guide = null; }
 }

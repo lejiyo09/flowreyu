@@ -213,11 +213,11 @@ body.drag-over #library .lib-body { outline: 3px dashed var(--accent); outline-o
 .toolbar::-webkit-scrollbar { display: none; }
 .toolbar button { flex: none; }
 .tools { display: flex; gap: 2px; }
-.tools button, #btnUndo, #btnRedo {
+.tools button, #btnUndo, #btnRedo, .toolbar .tg {
   width: 46px; height: 46px; border: 0; border-radius: 12px; background: none; display: grid; place-items: center; color: var(--text);
 }
 .tools button svg { width: 25px; height: 25px; }
-.tools button.on { background: var(--accent-soft); color: var(--accent); }
+.tools button.on, .toolbar .tg.on { background: var(--accent-soft); color: var(--accent); }
 #btnUndo:disabled, #btnRedo:disabled { opacity: 0.3; }
 .sep { width: 1px; height: 28px; background: var(--line); margin: 0 6px; flex: none; }
 .quick-colors { display: flex; gap: 4px; }

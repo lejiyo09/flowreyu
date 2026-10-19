@@ -43,6 +43,14 @@ export class ToolController {
     if (!tool) return;
     // 올가미가 아닌 도구를 쓰면 선택 해제
     if (name !== 'lasso' && this.selection) this.clearSelection();
+    // 자/각도기: 펜/형광펜을 모서리·호 근처에서 대면 그 선을 따라 그린다
+    const guides = this.app.guides;
+    this.snap = null;
+    if (guides && (name === 'pen' || name === 'hl')) {
+      this.snap = guides.snapperAt(ev.sx, ev.sy);
+      if (this.snap) { const q = this.snap.project(ev.sx, ev.sy); ev = { ...ev, sx: q.x, sy: q.y, snapped: true }; }
+    }
+    guides?.penAt(ev.sx, ev.sy);
     const hit = this.viewer.pageAtScreen(ev.sx, ev.sy);
     if (!hit) return;
     this.cur = { tool, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy };
@@ -52,6 +60,13 @@ export class ToolController {
   move(pts, pred, isFinal) {
     const c = this.cur;
     if (!c) return;
+    if (this.snap) {
+      const pr = (p) => { const q = this.snap.project(p.sx, p.sy); return { ...p, sx: q.x, sy: q.y }; };
+      pts = pts.map(pr);
+      if (pred) pred = pr(pred);
+    }
+    const last = pts[pts.length - 1];
+    if (last) this.app.guides?.penAt(last.sx, last.sy);
     for (const p of pts) { c.path += dist(c.lastSx, c.lastSy, p.sx, p.sy); c.lastSx = p.sx; c.lastSy = p.sy; }
     c.tool.move(c, pts, pred, isFinal);
   }
@@ -59,12 +74,16 @@ export class ToolController {
   end() {
     const c = this.cur;
     this.cur = null;
+    this.snap = null;
+    this.app.guides?.penUp();
     if (c) c.tool.end(c);
   }
 
   cancel() {
     const c = this.cur;
     this.cur = null;
+    this.snap = null;
+    this.app.guides?.penUp();
     if (c) c.tool.cancel(c);
     this.viewer.clearLive();
   }
@@ -165,7 +184,8 @@ class PenTool {
     c.pts = [];
     c.prevP = ev.p;
     c.runs = []; // 그리는 중인 두께별 구간 (ink.strokeRuns 와 같은 규칙)
-    c.smooth = Math.min(settings.get('smoothing'), 10) * 0.065; // 0 ~ 0.65
+    // 자/각도기에 붙은 획은 이미 정확한 선 위에 있으므로 평활화하지 않는다 (호가 안쪽으로 줄어드는 것 방지)
+    c.smooth = ev.snapped ? 0 : Math.min(settings.get('smoothing'), 10) * 0.065; // 0 ~ 0.65
     c.minStep = 0.35 / v.cam.z; // 화면 0.35px 미만 이동은 무시
     v.liveCanvas.style.mixBlendMode = this.kind === 'hl' ? 'multiply' : 'normal';
     this.addPoint(c, ev.sx, ev.sy, ev.p, true);

@@ -6,6 +6,7 @@ import { Viewer, pdfjsLib } from './viewer.js';
 import { InputRouter } from './input.js';
 import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
+import { Guides } from './guides.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
 import { sanitizeItem, TEXT_FONT, textLayout } from './ink.js';
@@ -78,6 +79,7 @@ const app = {
   },
   toast,
 };
+app.guides = new Guides(viewer, $('#cvGuide'));
 const tools = new ToolController(viewer, app);
 const input = new InputRouter(viewer, tools, app);
 const thumbs = new ThumbPanel($('#thumbs'), $('#thumbList'), viewer, (i) => { viewer.goToPage(i); });
@@ -642,6 +644,16 @@ function updateHistoryButtons() {
   $('#btnUndo').disabled = !d?.canUndo();
   $('#btnRedo').disabled = !d?.canRedo();
 }
+$('#btnRuler').addEventListener('click', () => {
+  const on = app.guides.toggleRuler();
+  $('#btnRuler').classList.toggle('on', on);
+  if (on) toast('자: 손가락으로 끌어 이동, 두 손가락으로 회전. 모서리를 따라 펜으로 그으면 직선', { ms: 3500 });
+});
+$('#btnProt').addEventListener('click', () => {
+  const on = app.guides.toggleProtractor();
+  $('#btnProt').classList.toggle('on', on);
+  if (on) toast('각도기: 손가락으로 이동·회전. 호/밑변을 따라 그리기, 펜 위치의 각도 표시', { ms: 3500 });
+});
 $('#btnUndo').addEventListener('click', doUndo);
 $('#btnRedo').addEventListener('click', doRedo);
 
