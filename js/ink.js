@@ -258,10 +258,19 @@ export function noteIconRect(n) {
   return { x: n.x, y: n.y, w: Math.min(NOTE_ICON, n.w), h: Math.min(NOTE_ICON, n.h) };
 }
 
-/** 펼친 포스트잇의 접기(–) 버튼 영역 (오른쪽 위) */
+/** 포스트잇 윗부분(어두운 띠) 높이: 펜·손가락으로 잡고 끌어 옮기는 손잡이 */
+export function noteHeadH(n) { return Math.min(18, n.h * 0.18); }
+
+/** 펼친 포스트잇의 접기(–) 버튼 영역 (어두운 띠의 오른쪽 끝) */
 export function noteFoldButton(n) {
-  const s = Math.min(18, n.w * 0.3, n.h * 0.3);
-  return { x: n.x + n.w - s, y: n.y, w: s, h: s };
+  const s = Math.max(noteHeadH(n), Math.min(22, n.w * 0.25));
+  return { x: n.x + n.w - s, y: n.y, w: s, h: noteHeadH(n) };
+}
+
+/** 끌어 옮기는 손잡이 영역: 펼친 상태는 어두운 띠(접기 버튼 제외), 접힌 상태는 아이콘 전체 */
+export function noteHandle(n) {
+  if (n.fold) return noteIconRect(n);
+  return { x: n.x, y: n.y, w: n.w - noteFoldButton(n).w, h: noteHeadH(n) };
 }
 
 const inRect = (b, r) => b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.w <= r.x + r.w + 0.5 && b.y + b.h <= r.y + r.h + 0.5;
@@ -314,6 +323,9 @@ export function noteLines(item) {
   return out;
 }
 
+/** 포스트잇 글이 시작하는 높이 (띠 아래) */
+export function noteTextTop(n) { return noteHeadH(n) + 4; }
+
 function drawNote(ctx, item) {
   if (item.fold) {
     // 접힌 상태: 작은 포스트잇 아이콘 (모서리 접힘 + 줄)
@@ -344,9 +356,13 @@ function drawNote(ctx, item) {
   ctx.fillStyle = item.c;
   ctx.fillRect(item.x, item.y, item.w, item.h);
   ctx.restore();
-  // 윗부분 접착면 느낌 + 접기(–) 버튼
-  ctx.fillStyle = 'rgba(0,0,0,0.05)';
-  ctx.fillRect(item.x, item.y, item.w, Math.min(10, item.h * 0.12));
+  // 어두운 띠(손잡이) + 가운데 잡는 표시 + 접기(–) 버튼
+  const hh = noteHeadH(item);
+  ctx.fillStyle = 'rgba(0,0,0,0.10)';
+  ctx.fillRect(item.x, item.y, item.w, hh);
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  const gx = item.x + item.w / 2, gy = item.y + hh / 2, gr = Math.max(0.6, hh * 0.07);
+  for (const dx of [-hh * 0.4, 0, hh * 0.4]) { ctx.beginPath(); ctx.arc(gx + dx, gy, gr, 0, Math.PI * 2); ctx.fill(); }
   const fb = noteFoldButton(item);
   ctx.strokeStyle = 'rgba(0,0,0,0.45)';
   ctx.lineWidth = Math.max(0.8, fb.w * 0.09);
@@ -363,7 +379,7 @@ function drawNote(ctx, item) {
   ctx.font = `${item.fs}px ${TEXT_FONT}`;
   ctx.textBaseline = 'top';
   const lines = noteLines(item);
-  for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], item.x + NOTE_PAD, item.y + NOTE_PAD + 4 + i * item.fs * TEXT_LINE);
+  for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], item.x + NOTE_PAD, item.y + noteTextTop(item) + i * item.fs * TEXT_LINE);
   ctx.restore();
 }
 

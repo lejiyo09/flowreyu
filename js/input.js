@@ -478,7 +478,7 @@ class TouchInput {
 
   active() {
     const out = [];
-    for (const [id, t] of this.touches) if (!t.rejected && !t.guide) out.push([id, t]);
+    for (const [id, t] of this.touches) if (!t.rejected && !t.guide && !t.noteDrag) out.push([id, t]);
     return out;
   }
 
@@ -505,6 +505,8 @@ class TouchInput {
     if (t.rejected) { this.gesture.rejectedAny = true; r.trace(`손가락 ${e.pointerId} 거부: ${reason}`); return; }
     // 자/각도기 위에 닿은 손가락은 화면 대신 도구를 옮긴다
     if (r.app.guides?.grab(e.pointerId, s.x, s.y)) { t.guide = true; this.gesture.rejectedAny = true; this.rebase(); return; }
+    // 포스트잇 어두운 띠(손잡이)를 손가락으로 잡으면 화면 대신 포스트잇을 옮긴다
+    if (r.app.noteDragStart?.(s.x, s.y)) { t.noteDrag = true; this.gesture.rejectedAny = true; this.rebase(); return; }
 
     // 손가락 필기 모드
     if (settings.get('fingerDraw')) {
@@ -557,6 +559,7 @@ class TouchInput {
     const t = this.touches.get(e.pointerId);
     if (!t || t.rejected) return;
     if (t.guide) { this.r.app.guides?.move(e.pointerId, t.x, t.y); return; }
+    if (t.noteDrag) { this.r.app.noteDragMove(t.x, t.y); return; }
     // 이동 중 접촉면이 커지면(손바닥이 눕는 경우) 그때라도 제외
     if (this.isPalm(e)) { t.rejected = true; t.reason = 'palm-size'; if (this.gesture) this.gesture.rejectedAny = true; this.rebase(); return; }
     if (this.gesture && dist(t.x0, t.y0, t.x, t.y) > 10) { this.gesture.moved = true; this.cancelFingerHold(); }
@@ -571,6 +574,11 @@ class TouchInput {
     this.touches.delete(e.pointerId);
     this.cancelFingerHold();
     if (t.guide) this.r.app.guides?.release(e.pointerId);
+    if (t.noteDrag) {
+      // 안 움직였으면 탭: 접힌 아이콘 펼치기 등
+      const moved = this.r.app.noteDragEnd(!!cancelled);
+      if (!moved && !cancelled) this.r.app.tap?.(t.x0, t.y0);
+    }
     if (this.touches.size === 0) {
       const g = this.gesture;
       this.gesture = null;
@@ -644,6 +652,7 @@ class TouchInput {
   rejectAll(reason) {
     this.cancelFingerHold();
     if (!this.touches.size) return;
+    for (const t of this.touches.values()) if (t.noteDrag) { this.r.app.noteDragEnd(false); t.noteDrag = false; }
     for (const [id, t] of this.touches) if (t.guide) this.r.app.guides?.release(id);
     for (const t of this.touches.values()) if (!t.rejected) { t.rejected = true; t.reason = reason; }
     if (this.gesture) this.gesture.rejectedAny = true;

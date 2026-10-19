@@ -9,7 +9,7 @@ import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -71,6 +71,9 @@ const app = {
   },
   tap: (sx, sy) => followLinkAt(sx, sy),
   foldAt: (page, x, y) => foldAt(page, x, y),
+  noteDragStart: (sx, sy) => noteDragStart(sx, sy),
+  noteDragMove: (sx, sy) => noteDragMove(sx, sy),
+  noteDragEnd: (cancel) => noteDragEnd(cancel),
   // 펜 두 번 탭 메뉴: 첫 탭이 남긴 편집을 기록 없이 되돌리기 위한 표식
   historyMark: () => (state.doc ? { len: state.doc.undoStack.length, top: state.doc.undoStack[state.doc.undoStack.length - 1] } : null),
   revertTo: (mark) => {
@@ -631,6 +634,51 @@ function foldAt(page, x, y) {
   return false;
 }
 
+// ── 포스트잇 끌어 옮기기: 어두운 띠(또는 접힌 아이콘)를 펜·손가락으로 잡고 끌기 ──
+let noteDrag = null; // {page, ids, sx0, sy0, m}
+
+/** 화면 점이 포스트잇 손잡이 위면 끌기 시작 (도구와 무관). 시작했으면 {page}, 아니면 false */
+function noteDragStart(sx, sy) {
+  if (noteDrag) return false;
+  const d = state.doc;
+  const hit = d && viewer.pageAtScreen(sx, sy, true);
+  if (!hit) return false;
+  const items = d.items(hit.page);
+  for (let i = items.length - 1; i >= 0; i--) {
+    const n = items[i];
+    if (n.t !== 'nt' || !inside(noteHandle(n), hit.x, hit.y)) continue;
+    commitTextEdit();
+    tools.clearSelection();
+    const ids = new Set([n.id, ...noteAttached(items, n)]);
+    noteDrag = { page: hit.page, ids, sx0: sx, sy0: sy, m: { s: 1, ox: n.x, oy: n.y, dx: 0, dy: 0 }, moved: false };
+    viewer.selection = { page: hit.page, ids, m: noteDrag.m };
+    return { page: hit.page };
+  }
+  return false;
+}
+function noteDragMove(sx, sy) {
+  const g = noteDrag;
+  if (!g) return;
+  const z = viewer.cam.z;
+  g.m.dx = (sx - g.sx0) / z;
+  g.m.dy = (sy - g.sy0) / z;
+  if (Math.hypot(sx - g.sx0, sy - g.sy0) > 6) g.moved = true;
+  viewer.selection = { page: g.page, ids: g.ids, m: { ...g.m } };
+  viewer.requestInk();
+}
+/** 끝: 움직였으면 위치 확정(실행 취소 가능), 안 움직였으면 탭으로 보고 false (접힌 아이콘은 펼침) */
+function noteDragEnd(cancel) {
+  const g = noteDrag;
+  noteDrag = null;
+  viewer.selection = null;
+  if (!g) return false;
+  const d = state.doc;
+  if (!cancel && g.moved && d) {
+    d.setItems(g.page, d.items(g.page).map((it) => (g.ids.has(it.id) ? transformItem(it, g.m) : it)));
+  } else viewer.requestInk();
+  return g.moved;
+}
+
 function insertNote(at) {
   const doc = state.doc;
   if (!doc) return;
@@ -1167,8 +1215,8 @@ function positionTextEditor() {
     // 포스트잇 안쪽에 맞춘 자동 줄바꿈 입력칸
     const it = ed.item;
     Object.assign(te.style, {
-      left: a.x + NOTE_PAD * z + 'px', top: a.y + (NOTE_PAD + 4) * z + 'px',
-      width: (it.w - NOTE_PAD * 2) * z + 'px', height: (it.h - NOTE_PAD * 2 - 4) * z + 'px',
+      left: a.x + NOTE_PAD * z + 'px', top: a.y + noteTextTop(it) * z + 'px',
+      width: (it.w - NOTE_PAD * 2) * z + 'px', height: (it.h - noteTextTop(it) - NOTE_PAD) * z + 'px',
       fontSize: ed.fs * z + 'px', lineHeight: TEXT_LINE, color: ed.c, fontFamily: TEXT_FONT,
     });
     return;

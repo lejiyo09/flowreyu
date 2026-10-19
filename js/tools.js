@@ -23,6 +23,13 @@ export class ToolController {
       shape: new ShapeTool(this),
       link: new LinkTool(this),
     };
+    // 포스트잇 손잡이 끌기 (도구와 별개)
+    this.noteDragTool = {
+      begin() {},
+      move(c, pts) { const p = pts[pts.length - 1]; if (p) app.noteDragMove(p.sx, p.sy); },
+      end() { app.noteDragEnd(false); },
+      cancel() { app.noteDragEnd(true); },
+    };
   }
 
   get doc() { return this.app.doc(); }
@@ -38,6 +45,12 @@ export class ToolController {
   begin(ev) {
     if (!this.doc) return;
     if (this.cur) this.cancel();
+    // 포스트잇 어두운 띠(손잡이)를 펜으로 잡으면 어떤 도구든 포스트잇 옮기기
+    const nd = this.app.noteDragStart?.(ev.sx, ev.sy);
+    if (nd) {
+      this.cur = { tool: this.noteDragTool, name: 'noteDrag', page: nd.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy };
+      return;
+    }
     const name = this.toolName(ev.toolOverride);
     const tool = this.tools[name];
     if (!tool) return;
