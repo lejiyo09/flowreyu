@@ -285,6 +285,7 @@ class EraserTool {
 
   begin(c, ev) {
     c.mode = settings.get('eraser').mode;
+    c.eraseText = !!settings.get('eraser').text;
     c.r = settings.get('eraser').size / 2; // 화면 px
     c.lx = ev.sx; c.ly = ev.sy;
     c.changed = false;
@@ -311,6 +312,8 @@ class EraserTool {
       let out = null;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
+        // 텍스트는 지우개로 지우지 않는다 (올가미나 텍스트 편집으로 삭제). 설정으로 허용 가능
+        if (it.t === 'tx' && !c.eraseText) { if (out) out.push(it); continue; }
         if (c.mode === 'area' && it.t === 's') {
           // 이동 구간을 잘게 나눠 부분 지우기
           let parts = [it];

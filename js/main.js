@@ -847,6 +847,9 @@ function renderToolPopup(tool) {
     const ar = h(`<div class="row"><span>한 번 지우면 이전 도구로</span><input type="checkbox" class="switch" ${er.autoReturn ? 'checked' : ''}></div>`);
     ar.querySelector('input').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
     pop.appendChild(ar);
+    const tx = h(`<div class="row"><span>텍스트도 지우기<small class="muted" style="display:block;font-size:11px">끄면 텍스트는 지우개에 지워지지 않음 (올가미로 삭제)</small></span><input type="checkbox" class="switch" ${er.text ? 'checked' : ''}></div>`);
+    tx.querySelector('input').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), text: e.target.checked }));
+    pop.appendChild(tx);
     const clr = h('<div class="row"><span>현재 페이지</span><button class="btn sm danger">페이지 필기 모두 지우기</button></div>');
     clr.querySelector('button').addEventListener('click', () => {
       const d = state.doc; if (!d) return;

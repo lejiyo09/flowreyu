@@ -53,6 +53,31 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await draw(440);
   await h.pen(cdp, h.line(X(300), Y(410), X(300), Y(470), 6), { buttons: 2, button: 'right' });
   check('temporary eraser (pen button) keeps current tool', (await tool()) === 'hl' && (await items()) === 0, `${await tool()} items=${await items()}`);
+  // 텍스트는 지우개로 지워지지 않음 (획 지우개·부분 지우개 모두)
+  await page.evaluate(() => { __flexnote.settings.set('gestures.penButton', 'menu'); __flexnote.settings.set('eraser', { ...__flexnote.settings.get('eraser'), autoReturn: false }); });
+  await page.evaluate(() => { const d = __flexnote.state.doc; d.add(0, { id: 'tx1', t: 'tx', x: 120, y: 120, c: '#111111', fs: 20, text: '지우면 안 되는 글' }); });
+  await page.click('#toolbar [data-tool=pen]');
+  const txScreen = await page.evaluate(() => __flexnote.viewer.pageToScreen(0, 160, 132));
+  await h.pen(cdp, h.line(X(txScreen.x - 60), Y(txScreen.y), X(txScreen.x + 80), Y(txScreen.y), 10)); // 글 위에 펜 획
+  const kinds = () => page.evaluate(() => __flexnote.state.doc.items(0).map((i) => i.t).sort().join(','));
+  await page.click('#toolbar [data-tool=eraser]');
+  await h.pen(cdp, h.line(X(txScreen.x), Y(txScreen.y - 30), X(txScreen.x), Y(txScreen.y + 30), 6));
+  check('stroke eraser over text: ink erased, text kept', (await kinds()) === 'tx', await kinds());
+  await page.evaluate(() => __flexnote.settings.set('eraser', { ...__flexnote.settings.get('eraser'), mode: 'area' }));
+  await page.click('#toolbar [data-tool=eraser]');
+  await h.pen(cdp, h.line(X(txScreen.x - 40), Y(txScreen.y - 10), X(txScreen.x + 40), Y(txScreen.y + 10), 6));
+  check('area eraser over text: text kept', (await kinds()) === 'tx', await kinds());
+  // 팝업에서 "텍스트도 지우기" 켜면 지워짐
+  await page.click('#toolbar [data-tool=eraser]');
+  await page.waitForSelector('#toolPopup:not([hidden])');
+  await page.locator('#toolPopup .row', { hasText: '텍스트도 지우기' }).locator('input').check();
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => __flexnote.settings.set('eraser', { ...__flexnote.settings.get('eraser'), mode: 'stroke' }));
+  await page.click('#toolbar [data-tool=eraser]');
+  await h.pen(cdp, h.line(X(txScreen.x), Y(txScreen.y - 30), X(txScreen.x), Y(txScreen.y + 30), 6));
+  check('"텍스트도 지우기" on: text erased', (await kinds()) === '', await kinds());
+  await page.evaluate(() => __flexnote.settings.set('eraser', { ...__flexnote.settings.get('eraser'), text: false, autoReturn: true }));
+
   // 설정 유지 + 설정 창 반영
   await page.reload();
   await page.waitForSelector('#editor:not([hidden])');

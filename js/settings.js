@@ -65,7 +65,7 @@ export const DEFAULTS = {
   tool: 'pen',
   pen: { color: '#111111', width: 2.2, recent: ['#111111', '#e53935', '#1e63d6'] },
   hl: { color: '#fff176', width: 14, recent: ['#fff176', '#a5f3a1', '#9fd8ff'] },
-  eraser: { mode: 'stroke', size: 16, autoReturn: false }, // stroke | area, size: 화면 px, autoReturn: 한 번 지우면 이전 도구로
+  eraser: { mode: 'stroke', size: 16, autoReturn: false, text: false }, // stroke | area, size: 화면 px, autoReturn: 한 번 지우면 이전 도구로, text: 텍스트도 지우기
   shape: { kind: 'rect', color: '#1e63d6', width: 2 },
   text: { color: '#111111', size: 16 },
   lasso: {},
