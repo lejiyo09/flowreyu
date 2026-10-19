@@ -218,7 +218,7 @@ body.drag-over #library .lib-body { outline: 3px dashed var(--accent); outline-o
 }
 .tools button svg { width: 25px; height: 25px; }
 .tools button.on, .toolbar .tg.on { background: var(--accent-soft); color: var(--accent); }
-#btnUndo:disabled, #btnRedo:disabled { opacity: 0.3; }
+#btnUndo:disabled, #btnRedo:disabled { color: var(--line); } /* 투명도 대신 색: 고정된 버튼 배경이 비치지 않게 */
 .sep { width: 1px; height: 28px; background: var(--line); margin: 0 6px; flex: none; }
 .quick-colors { display: flex; gap: 4px; }
 .swatch {
@@ -323,3 +323,48 @@ input[type=range] { accent-color: var(--accent); }
   background: var(--surface); color: var(--accent); font-weight: 600; box-shadow: var(--shadow);
 }
 .back-chip svg { width: 18px; height: 18px; }
+
+/* ── 휴대폰 세로 (좁은 화면) ── */
+@media (max-width: 600px) {
+  .topbar { gap: 2px; padding-left: max(2px, env(safe-area-inset-left)); padding-right: max(2px, env(safe-area-inset-right)); }
+  .tb-left, .tb-right { gap: 0; }
+  .topbar .icon-btn { width: 36px; height: 36px; }
+  .doc-title { flex: 1; min-width: 0; max-width: none; margin-left: 2px; font-size: 14px; }
+  .tb-left { flex: 1; min-width: 0; }
+  .save-state span { display: none; } /* 점만 표시 (색으로 상태 구분) */
+  .save-state[data-state="error"] span { display: inline; }
+  .zoom-ctl { display: none; } /* 두 손가락으로 확대·축소 */
+  .page-ind { padding: 6px 8px; font-size: 12px; }
+
+  /* 도구 모음: 화면 폭 전체, 가로 스크롤. 실행 취소/다시 실행은 오른쪽에 고정 */
+  .toolbar {
+    left: 0; right: 0; transform: none; bottom: 0; max-width: none; border-radius: 16px 16px 0 0;
+    padding: 6px 0 calc(6px + env(safe-area-inset-bottom)) 4px; border-left: 0; border-right: 0; border-bottom: 0;
+  }
+  .tools button, #btnUndo, #btnRedo, .toolbar .tg { width: 42px; height: 42px; }
+  #btnUndo, #btnRedo { position: sticky; background: var(--surface); z-index: 1; }
+  #btnRedo { right: 0; }
+  #btnUndo { right: 42px; box-shadow: -10px 0 10px -6px var(--surface); }
+  .sep { margin: 0 3px; }
+  .quick-colors .swatch { width: 28px; height: 28px; }
+
+  .thumbs { width: 160px; }
+  .thumb .tcv { width: 110px; }
+
+  .lib-head { padding: 10px 12px; }
+  .brand span { font-size: 18px; }
+  .lib-actions { gap: 4px; }
+  .lib-actions .btn:not(.primary) span { display: none; }
+  .lib-actions .btn { padding: 0 10px; }
+  .doc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px 12px; }
+
+  .dlg .row { flex-wrap: wrap; gap: 6px 12px; padding: 4px 0; }
+  .dlg .row > span:first-child { flex: 1 1 60%; }
+  .dlg input[type=range] { width: 100%; flex: 1 1 100%; }
+  .dlg select { max-width: 100%; }
+  .dlg-body { padding: 4px 14px 16px; }
+  .settings-dlg, .small-dlg { width: calc(100vw - 16px); }
+  .update-bar { top: calc(54px + env(safe-area-inset-top)); }
+  .back-chip { top: 8px; left: 8px; }
+  .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
+}

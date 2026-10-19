@@ -644,6 +644,15 @@ function updateHistoryButtons() {
   $('#btnUndo').disabled = !d?.canUndo();
   $('#btnRedo').disabled = !d?.canRedo();
 }
+// 손가락 쓰기: 펜이 없는 휴대폰용. 켜면 한 손가락은 필기, 두 손가락은 이동·확대
+function renderFingerBtn() { $('#btnFinger').classList.toggle('on', settings.get('fingerDraw')); }
+$('#btnFinger').addEventListener('click', () => {
+  settings.set('fingerDraw', !settings.get('fingerDraw'));
+  toast(settings.get('fingerDraw') ? '손가락으로 쓰기: 한 손가락 필기, 두 손가락으로 이동·확대' : '손가락은 화면 이동만 (필기는 펜으로)', { ms: 2500 });
+});
+settings.on('change', ({ path }) => { if (path === 'fingerDraw' || path === '*') renderFingerBtn(); });
+renderFingerBtn();
+
 $('#btnRuler').addEventListener('click', () => {
   const on = app.guides.toggleRuler();
   $('#btnRuler').classList.toggle('on', on);
@@ -1079,6 +1088,13 @@ async function boot() {
   } catch (e) {
     toast('브라우저 저장소(IndexedDB)를 사용할 수 없어 자동 저장이 동작하지 않습니다: ' + store.describeError(e), { error: true, ms: 10000 });
   }
+  // 펜(정밀 포인터)이 없는 터치 기기: 처음 한 번 손가락 쓰기 안내
+  try {
+    if (!matchMedia('(any-pointer: fine)').matches && navigator.maxTouchPoints > 0 && !localStorage.getItem('flexnote.fingerHint')) {
+      localStorage.setItem('flexnote.fingerHint', '1');
+      setTimeout(() => toast('펜이 없다면 아래 도구 모음의 ✋(손가락으로 쓰기)를 켜세요', { ms: 5000 }), 1500);
+    }
+  } catch { /* */ }
   const last = await store.kvGet('lastDoc').catch(() => null);
   if (last && (await store.getDoc(last).catch(() => null))) await openDoc(last);
   else { showScreen('library'); renderLibrary(); }
