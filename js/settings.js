@@ -6,17 +6,45 @@ const KEY = 'flexnote.settings.v1';
 export const PEN_COLORS = ['#111111', '#e53935', '#1e63d6', '#2e9d4f', '#f08c00', '#8e44ad', '#795548', '#ffffff'];
 export const HL_COLORS = ['#fff176', '#a5f3a1', '#9fd8ff', '#ffb3d1', '#ffcc80', '#d1b3ff'];
 
+/** 제스처에 지정할 수 있는 동작 */
+export const GESTURE_ACTIONS = [
+  ['none', '사용 안 함'],
+  ['menu', '도구 메뉴'],
+  ['undo', '실행 취소'],
+  ['redo', '다시 실행'],
+  ['toggleEraser', '지우개 ↔ 이전 도구'],
+  ['prevTool', '직전에 쓴 도구로'],
+  ['tool:pen', '펜'],
+  ['tool:hl', '형광펜'],
+  ['tool:eraser', '지우개'],
+  ['tool:lasso', '올가미'],
+  ['tool:text', '텍스트'],
+  ['tool:shape', '도형'],
+  ['tool:link', '링크'],
+  ['toggleFinger', '손가락 쓰기 켜기/끄기'],
+  ['toggleRuler', '자 켜기/끄기'],
+  ['toggleProt', '각도기 켜기/끄기'],
+  ['thumbs', '페이지 목록 열기/닫기'],
+  ['fitWidth', '폭 맞춤'],
+];
+/** 제스처 목록: [키, 이름, 설명, 추가 동작] */
+export const GESTURES = [
+  ['penButton', 'S Pen 버튼 + 터치', '버튼 신호를 브라우저에 보내는 기기에서만 동작 (갤럭시 탭 크롬은 보내지 않음)', [['eraserHold', '누르는 동안 지우개']]],
+  ['penHold', '펜 꾹 누르기', '펜을 대고 움직이지 않으면 (시간·허용 거리는 아래에서)', []],
+  ['penDoubleTap', '펜 두 번 탭', '같은 곳을 빠르게 두 번 탭 (찍힌 점은 지워짐)', []],
+  ['twoFingerTap', '두 손가락 탭', '', []],
+  ['threeFingerTap', '세 손가락 탭', '', []],
+  ['fingerHold', '손가락 꾹 누르기', '한 손가락을 대고 0.6초 움직이지 않으면', []],
+];
+
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
 
   // S Pen / 펜
-  penButtonAction: 'menu', // menu | eraser | none
   penHoverButton: true, // 호버 중 버튼 입력(buttons=2)도 메뉴로 처리
-  holdEnabled: true,
   holdMs: 700, // 300~5000
   holdTolerance: 10, // CSS px (버튼을 누르면 펜 끝이 조금 움직이므로 여유 있게)
   holdCondition: 'start', // start: 펜을 댄 직후 움직이지 않을 때만 / anytime: 필기 도중 멈춰도
-  penDoubleTap: true, // 펜으로 같은 곳을 빠르게 두 번 탭 → 도구 메뉴 (버튼 신호를 주지 않는 기기의 대안)
   pressure: true,
   smoothing: 2, // 0~10
   prediction: true,
@@ -28,8 +56,6 @@ export const DEFAULTS = {
   penGuardMs: 300, // 펜을 뗀 뒤 이 시간 동안 새 터치를 무시
   hoverGuard: false, // 펜이 화면 위에 떠 있는 동안 새 터치 무시
   undoRestorePan: true, // 펜이 닿기 직전 시작된 한 손가락 이동은 되돌림
-  twoFingerUndo: true,
-  threeFingerRedo: true,
   inertia: true,
 
   // 마우스
@@ -44,8 +70,18 @@ export const DEFAULTS = {
   text: { color: '#111111', size: 16 },
   lasso: {},
 
+  // 제스처 → 동작 (GESTURE_ACTIONS 의 id)
+  gestures: {
+    penButton: 'menu',
+    penHold: 'menu',
+    penDoubleTap: 'menu',
+    twoFingerTap: 'undo',
+    threeFingerTap: 'redo',
+    fingerHold: 'none',
+  },
+
   debug: false,
-  sv: 2, // 설정 버전 (기본값 변경 시 마이그레이션)
+  sv: 3, // 설정 버전 (기본값 변경 시 마이그레이션)
 };
 
 function merge(base, over) {
@@ -68,6 +104,17 @@ function migrate(saved) {
     if (saved.holdTolerance === 6) saved.holdTolerance = 10;
     saved.sv = 2;
   }
+  if (saved.sv < 3) {
+    // 켜고 끄기만 하던 제스처 설정을 "제스처 → 동작" 지정으로 옮긴다
+    const g = (saved.gestures = { ...(saved.gestures || {}) });
+    if (saved.penButtonAction) g.penButton = { menu: 'menu', eraser: 'eraserHold', none: 'none' }[saved.penButtonAction] || 'menu';
+    if (saved.holdEnabled === false) g.penHold = 'none';
+    if (saved.penDoubleTap === false) g.penDoubleTap = 'none';
+    if (saved.twoFingerUndo === false) g.twoFingerTap = 'none';
+    if (saved.threeFingerRedo === false) g.threeFingerTap = 'none';
+    for (const k of ['penButtonAction', 'holdEnabled', 'penDoubleTap', 'twoFingerUndo', 'threeFingerRedo']) delete saved[k];
+    saved.sv = 3;
+  }
 }
 
 function sanitize(s) {
@@ -82,7 +129,11 @@ function sanitize(s) {
   s.shape.width = clamp(+s.shape.width || 2, 0.3, 30);
   s.text.size = clamp(+s.text.size || 16, 6, 120);
   if (!['system', 'light', 'dark'].includes(s.theme)) s.theme = 'system';
-  if (!['menu', 'eraser', 'none'].includes(s.penButtonAction)) s.penButtonAction = 'menu';
+  const ids = new Set(GESTURE_ACTIONS.map(([id]) => id));
+  for (const [key, , , extra] of GESTURES) {
+    const ok = ids.has(s.gestures[key]) || extra.some(([id]) => id === s.gestures[key]);
+    if (!ok) s.gestures[key] = DEFAULTS.gestures[key];
+  }
   if (!['start', 'anytime'].includes(s.holdCondition)) s.holdCondition = 'start';
   if (!['pen', 'hl', 'eraser', 'lasso', 'text', 'shape', 'link'].includes(s.tool)) s.tool = 'pen';
   return s;

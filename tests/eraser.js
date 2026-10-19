@@ -48,7 +48,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await erase(380);
   check('eraser picked from quick menu also returns to pen', (await tool()) === 'pen', await tool());
   // 펜 버튼을 "누르는 동안 지우개"로 쓴 경우는 도구 변경 없음
-  await page.evaluate(() => __flexnote.settings.set('penButtonAction', 'eraser'));
+  await page.evaluate(() => __flexnote.settings.set('gestures.penButton', 'eraserHold'));
   await page.click('#toolbar [data-tool=hl]');
   await draw(440);
   await h.pen(cdp, h.line(X(300), Y(410), X(300), Y(470), 6), { buttons: 2, button: 'right' });

@@ -1,5 +1,5 @@
 // 앱 진입점: 라이브러리 ↔ 편집기, 도구 UI, 설정, 자동 저장 상태 표시를 연결한다.
-import { settings, PEN_COLORS, HL_COLORS } from './settings.js';
+import { settings, PEN_COLORS, HL_COLORS, GESTURES, GESTURE_ACTIONS } from './settings.js';
 import * as store from './store.js';
 import { NoteDocument } from './document.js';
 import { Viewer, pdfjsLib } from './viewer.js';
@@ -60,9 +60,7 @@ const viewer = new Viewer($('#viewport'), $('#world'), { hl: $('#cvHl'), ink: $(
 const app = {
   doc: () => state.doc,
   isUiTarget: (el) => !!(el && el.closest && el.closest('[data-ui]')),
-  openMenu: (sx, sy, source) => openQuickMenu(sx, sy, source),
-  undo: () => doUndo(),
-  redo: () => doRedo(),
+  runAction: (action, sx, sy, source) => runAction(action, sx, sy, source),
   showZoom: () => showZoomBadge(),
   onSelection: (sel, dragging, m) => renderSelection(sel, dragging, m),
   editText: (page, item, x, y) => startTextEdit(page, item, x, y),
@@ -697,11 +695,14 @@ function toolCfgKey(tool) { return ['pen', 'hl', 'text', 'shape'].includes(tool)
 
 // 지우개로 바꾸기 직전의 도구 (지우개 "한 번 쓰고 돌아가기"용)
 let toolBeforeEraser = settings.get('tool') === 'eraser' ? 'pen' : settings.get('tool');
+// 직전에 쓰던 도구 ("직전에 쓴 도구로" 제스처용)
+let previousTool = settings.get('tool') === 'pen' ? 'hl' : 'pen';
 
 function selectTool(tool) {
   const prev = settings.get('tool');
   if (prev !== tool) {
     if (tool === 'eraser') toolBeforeEraser = prev;
+    previousTool = prev;
     commitTextEdit();
     if (tool !== 'lasso') tools.clearSelection();
     settings.set('tool', tool);
@@ -864,6 +865,43 @@ function renderToolPopup(tool) {
   requestAnimationFrame(drawPreview);
 }
 
+// ───────────────────────────── 제스처 동작 ─────────────────────────────
+// 설정 → 제스처 동작에서 각 제스처(펜 꾹 누르기, 펜 두 번 탭, 두 손가락 탭 …)에 지정한 동작을 실행한다.
+
+function runAction(action, sx, sy, source) {
+  if (state.screen !== 'editor') return;
+  const brief = (msg) => toast(msg, { ms: 900 });
+  if (action.startsWith('tool:')) {
+    const t = action.slice(5);
+    selectTool(t);
+    brief(TOOL_NAMES[t]);
+    return;
+  }
+  switch (action) {
+    case 'menu': openQuickMenu(sx, sy, source); break;
+    case 'undo': doUndo(); break;
+    case 'redo': doRedo(); break;
+    case 'toggleEraser': {
+      const to = settings.get('tool') === 'eraser' ? (toolBeforeEraser || 'pen') : 'eraser';
+      selectTool(to);
+      brief(TOOL_NAMES[to]);
+      break;
+    }
+    case 'prevTool': {
+      const to = previousTool && previousTool !== settings.get('tool') ? previousTool : 'pen';
+      selectTool(to);
+      brief(TOOL_NAMES[to]);
+      break;
+    }
+    case 'toggleFinger': $('#btnFinger').click(); break;
+    case 'toggleRuler': $('#btnRuler').click(); break;
+    case 'toggleProt': $('#btnProt').click(); break;
+    case 'thumbs': $('#btnThumbs').click(); break;
+    case 'fitWidth': viewer.fitWidth(); showZoomBadge(); break;
+    default: break;
+  }
+}
+
 // ───────────────────────────── S Pen 빠른 메뉴 ─────────────────────────────
 
 function openQuickMenu(sx, sy, source) {
@@ -1013,7 +1051,18 @@ function openSettings() {
 }
 $('#setEraserReturn').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
 
+// 제스처 동작 선택 칸 (설정 → 제스처 동작)
+for (const [key, label, hint, extra] of GESTURES) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const opts = [...extra, ...GESTURE_ACTIONS].map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`).join('');
+  row.innerHTML = `<span>${escapeHtml(label)}${hint ? `<small>${escapeHtml(hint)}</small>` : ''}</span><select data-gesture="${key}">${opts}</select>`;
+  row.querySelector('select').addEventListener('change', (e) => settings.set(`gestures.${key}`, e.target.value));
+  $('#gestureRows').appendChild(row);
+}
+
 function syncSettingsForm() {
+  for (const sel of dlg.querySelectorAll('[data-gesture]')) sel.value = settings.get('gestures')[sel.dataset.gesture];
   $('#setEraserReturn').checked = !!settings.get('eraser').autoReturn;
   for (const el of dlg.querySelectorAll('[data-setting]')) {
     const k = el.dataset.setting, v = settings.get(k);

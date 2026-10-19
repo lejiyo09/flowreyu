@@ -26,6 +26,10 @@ const PEN_STALE_MS = 400; // 이 시간 동안 펜 이벤트가 없으면 펜 �
 const MENU_DEDUPE_MS = 700;
 const PEN_RECENT_MS = 500;
 
+/** 설정 → 제스처 동작에서 이 제스처에 지정된 동작 */
+const gestureAction = (key) => settings.get('gestures')[key] || 'none';
+const FINGER_HOLD_MS = 600;
+
 const isSecondary = (e) => (e.buttons & BTN_SECONDARY) !== 0 || e.button === 2;
 const isEraserTip = (e) => (e.buttons & BTN_ERASER) !== 0 || e.button === 5;
 
@@ -97,8 +101,8 @@ export class InputRouter {
 
     // 1) 보조 버튼 (pen/mouse/touch 무엇으로 오든)
     if (isSecondary(e) && e.pointerType !== 'touch') {
-      const act = settings.get('penButtonAction');
-      if (e.pointerType === 'pen' && act === 'eraser') { this.pen.onDown(e, 'pen', 'eraser'); return; }
+      const act = gestureAction('penButton');
+      if (e.pointerType === 'pen' && act === 'eraserHold') { this.pen.onDown(e, 'pen', 'eraser'); return; }
       if (e.pointerType === 'pen' && act === 'none') { this.pen.onDown(e, 'pen'); return; }
       this.consumePointer(e);
       this.secondarySignal(e, `pointerdown:${e.pointerType} button=${e.button} buttons=${e.buttons}`);
@@ -119,13 +123,13 @@ export class InputRouter {
       if (e.pointerType === 'pen' && e.buttons === 0) { this.trace('pen hover while active → 획 종료(pointerup 누락 복구)'); this.pen.onUp(e); return; }
       // 필기 도중 보조 버튼을 누름 (buttons 에 2 비트가 새로 생김)
       if (isSecondary(e) && !this.pen.activeHadSecondary()) {
-        const act = settings.get('penButtonAction');
-        if (act === 'menu' || e.pointerType !== 'pen') {
+        const act = gestureAction('penButton');
+        if (act === 'eraserHold' && e.pointerType === 'pen') { this.pen.switchToEraser(e); return; }
+        if (act !== 'none' || e.pointerType !== 'pen') {
           this.consumePointer(e);
           this.secondarySignal(e, `pointermove:${e.pointerType} buttons=${e.buttons}`);
           return;
         }
-        if (act === 'eraser') { this.pen.switchToEraser(e); return; }
       }
       this.pen.onMove(e);
       return;
@@ -220,9 +224,11 @@ export class InputRouter {
 
   /** 모든 보조 버튼 신호가 모이는 곳 */
   secondarySignal(e, source) {
-    const act = settings.get('penButtonAction');
-    if (act !== 'menu' && e.pointerType !== 'mouse' && !source.startsWith('pointerdown:mouse')) {
-      this.trace(`보조 버튼(${source}) — 설정이 '${act}'라 메뉴 열지 않음`);
+    // 진짜 마우스 오른쪽 버튼은 항상 도구 메뉴, 펜 버튼은 설정된 동작
+    const isMouse = e.pointerType === 'mouse' || source.startsWith('pointerdown:mouse');
+    const act = isMouse ? 'menu' : gestureAction('penButton');
+    if (act === 'none' || act === 'eraserHold') {
+      this.trace(`보조 버튼(${source}) — 설정이 '${act}'라 동작 없음`);
       return;
     }
     // 진행 중이던 획은 정리 (버튼 누르기 전에 찍힌 점은 버림)
@@ -233,13 +239,16 @@ export class InputRouter {
     const followUp = source.startsWith('contextmenu') || source.startsWith('auxclick');
     if (followUp && now() - this.lastMenuAt < MENU_DEDUPE_MS) { this.trace(`보조 버튼(${source}) — 직전에 열림, 중복 무시`); return; }
     const s = this.screen(e);
-    this.trace(`보조 버튼 → 메뉴 (${source})`);
-    this.openMenu(s.x, s.y, source);
+    this.runGesture(act, s.x, s.y, `pen-button(${source})`);
   }
 
-  openMenu(sx, sy, source) {
+  openMenu(sx, sy, source) { this.runGesture('menu', sx, sy, source); }
+
+  /** 제스처에 지정된 동작 실행 (도구 메뉴, 실행 취소, 도구 전환 …) */
+  runGesture(action, sx, sy, source) {
     this.lastMenuAt = now();
-    this.app.openMenu(sx, sy, source);
+    this.trace(`${source} → ${action}`);
+    this.app.runAction(action, sx, sy, source);
   }
 
   /** 펜이 닿는 순간: 진행 중인 손가락 제스처를 멈춘다 (팜 리젝션) */
@@ -317,7 +326,8 @@ class PenInput {
     // 호버 중 보조 버튼 누름(buttons 0→2)을 메뉴 열기로 사용 (기기가 전달하는 경우에만)
     const prev = this.hoverButtons.get(e.pointerId) || 0;
     this.hoverButtons.set(e.pointerId, e.buttons);
-    if (!settings.get('penHoverButton') || settings.get('penButtonAction') !== 'menu') return;
+    const act = gestureAction('penButton');
+    if (!settings.get('penHoverButton') || act === 'none' || act === 'eraserHold') return;
     if (!(prev & BTN_SECONDARY) && (e.buttons & BTN_SECONDARY) && !(e.buttons & 1)) {
       this.r.consumePointer(e);
       this.r.secondarySignal(e, `hover:pen buttons=${e.buttons}`);
@@ -377,7 +387,8 @@ class PenInput {
    * 짧고(<250ms) 거의 움직이지 않은 접촉 두 번이 350ms 안에, 18px 안에서 (콜론 같은 점 찍기와 구분) 일어나야 한다.
    */
   checkDoubleTap(a) {
-    if (a.kind !== 'pen' || !settings.get('penDoubleTap')) return false;
+    const act = gestureAction('penDoubleTap');
+    if (a.kind !== 'pen' || act === 'none') return false;
     const isTap = !a.moved && now() - a.t0 < 250;
     const prev = this.lastTap;
     this.lastTap = null;
@@ -387,8 +398,7 @@ class PenInput {
       this.end(true);
       this.r.app.revertTo?.(prev.mark);
       this.r.consumed.add(a.id);
-      this.r.trace('펜 두 번 탭 → 메뉴');
-      this.r.openMenu(a.sx0, a.sy0, 'double-tap');
+      this.r.runGesture(act, a.sx0, a.sy0, 'pen-double-tap');
       return true;
     }
     // 끝나는 시각 기준으로 다음 탭을 기다린다 (end 이후 기록)
@@ -400,7 +410,7 @@ class PenInput {
     const a = this.active;
     if (!a) return;
     this.clearHold();
-    if (!settings.get('holdEnabled') || a.kind !== 'pen') return;
+    if (gestureAction('penHold') === 'none' || a.kind !== 'pen') return;
     a.holdTimer = setTimeout(() => this.fireHold(), settings.get('holdMs'));
   }
 
@@ -416,8 +426,7 @@ class PenInput {
     const id = a.id, x = a.ax, y = a.ay;
     this.finishForMenu();
     this.r.consumed.add(id);
-    this.r.trace('정지 감지 → 메뉴');
-    this.r.openMenu(x, y, 'hold');
+    this.r.runGesture(gestureAction('penHold'), x, y, 'pen-hold');
   }
 
   /** 메뉴를 열기 위해 현재 획을 정리: 의미 없는 짧은 획은 버리고, 긴 획은 보존 */
@@ -514,7 +523,27 @@ class TouchInput {
     }
     this.gesture.maxCount = Math.max(this.gesture.maxCount, this.active().length);
     this.rebase();
+    this.armFingerHold(e.pointerId, t);
   }
+
+  /** 손가락 꾹 누르기: 한 손가락이 0.6초 동안 거의 움직이지 않으면 지정된 동작 */
+  armFingerHold(id, t) {
+    clearTimeout(this.holdTimer);
+    this.holdTimer = 0;
+    if (gestureAction('fingerHold') === 'none' || this.active().length !== 1) return;
+    this.holdTimer = setTimeout(() => {
+      this.holdTimer = 0;
+      const cur = this.touches.get(id);
+      if (!cur || cur !== t || cur.rejected || this.active().length !== 1 || dist(cur.x0, cur.y0, cur.x, cur.y) > 10) return;
+      // 이 손가락은 이후 화면을 움직이지 않는다 (탭·관성도 없음)
+      cur.rejected = true; cur.reason = 'finger-hold';
+      if (this.gesture) this.gesture.rejectedAny = true;
+      this.base = null;
+      this.r.runGesture(gestureAction('fingerHold'), cur.x0, cur.y0, 'finger-hold');
+    }, FINGER_HOLD_MS);
+  }
+
+  cancelFingerHold() { clearTimeout(this.holdTimer); this.holdTimer = 0; }
 
   /** 위치만 갱신 (손가락 필기 중에도 좌표를 최신으로 유지해 제스처 전환 시 튐 방지) */
   track(e) {
@@ -530,7 +559,7 @@ class TouchInput {
     if (t.guide) { this.r.app.guides?.move(e.pointerId, t.x, t.y); return; }
     // 이동 중 접촉면이 커지면(손바닥이 눕는 경우) 그때라도 제외
     if (this.isPalm(e)) { t.rejected = true; t.reason = 'palm-size'; if (this.gesture) this.gesture.rejectedAny = true; this.rebase(); return; }
-    if (this.gesture && dist(t.x0, t.y0, t.x, t.y) > 10) this.gesture.moved = true;
+    if (this.gesture && dist(t.x0, t.y0, t.x, t.y) > 10) { this.gesture.moved = true; this.cancelFingerHold(); }
     if (!this.base) this.rebase();
     this.apply(e.timeStamp);
   }
@@ -540,14 +569,20 @@ class TouchInput {
     if (this.fingerInk === e.pointerId) this.fingerInk = null;
     if (!t) return;
     this.touches.delete(e.pointerId);
+    this.cancelFingerHold();
     if (t.guide) this.r.app.guides?.release(e.pointerId);
     if (this.touches.size === 0) {
       const g = this.gesture;
       this.gesture = null;
       this.base = null;
       if (g && !cancelled && !g.moved && !g.rejectedAny && now() - g.t0 < 350) {
-        if (g.maxCount === 2 && settings.get('twoFingerUndo')) { this.r.viewer.setCamera(g.cam0.tx, g.cam0.ty, g.cam0.z); this.r.app.undo(); return; }
-        if (g.maxCount === 3 && settings.get('threeFingerRedo')) { this.r.viewer.setCamera(g.cam0.tx, g.cam0.ty, g.cam0.z); this.r.app.redo(); return; }
+        const key = g.maxCount === 2 ? 'twoFingerTap' : g.maxCount === 3 ? 'threeFingerTap' : null;
+        const act = key && gestureAction(key);
+        if (act && act !== 'none') {
+          this.r.viewer.setCamera(g.cam0.tx, g.cam0.ty, g.cam0.z); // 탭 중 미세하게 움직인 화면 원위치
+          this.r.runGesture(act, t.x0, t.y0, key);
+          return;
+        }
         // 한 손가락 탭: 링크 따라가기 (펜 필기와 겹치지 않도록 링크는 손가락으로만 연다)
         if (g.maxCount === 1 && !t.rejected && now() - g.t0 < 300) { this.r.app.tap?.(t.x0, t.y0); return; }
       }
@@ -607,6 +642,7 @@ class TouchInput {
   }
 
   rejectAll(reason) {
+    this.cancelFingerHold();
     if (!this.touches.size) return;
     for (const [id, t] of this.touches) if (t.guide) this.r.app.guides?.release(id);
     for (const t of this.touches.values()) if (!t.rejected) { t.rejected = true; t.reason = reason; }
@@ -615,7 +651,7 @@ class TouchInput {
   }
 
   /** 실제로는 손가락이 하나도 없는데 기록만 남은 경우 */
-  clearStale() { for (const id of this.touches.keys()) this.r.app.guides?.release(id); this.touches.clear(); this.base = null; this.gesture = null; this.fingerInk = null; }
+  clearStale() { this.cancelFingerHold(); for (const id of this.touches.keys()) this.r.app.guides?.release(id); this.touches.clear(); this.base = null; this.gesture = null; this.fingerInk = null; }
 
   startInertia() {
     if (!settings.get('inertia') || this.vel.length < 2) return;

@@ -178,32 +178,25 @@
       </section>
 
       <section>
-        <h3>S Pen</h3>
-        <div class="row"><span>보조 버튼 동작<small>버튼을 누른 채 화면을 터치했을 때</small></span>
-          <select data-setting="penButtonAction">
-            <option value="menu">도구 메뉴 열기</option>
-            <option value="eraser">누르는 동안 지우개</option>
-            <option value="none">사용 안 함</option>
+        <h3>제스처 동작</h3>
+        <p class="muted small" style="margin:2px 0 6px">각 제스처를 했을 때 실행할 동작을 고르세요.</p>
+        <div id="gestureRows"></div>
+        <div class="row"><span>펜 꾹 누르기 판정 시간 <b data-out="holdMs"></b></span><input type="range" min="300" max="5000" step="50" data-setting="holdMs"></div>
+        <div class="row"><span>펜 꾹 누르기 허용 이동 거리 <b data-out="holdTolerance"></b></span><input type="range" min="1" max="30" step="1" data-setting="holdTolerance"></div>
+        <div class="row"><span>펜 꾹 누르기 조건</span>
+          <select data-setting="holdCondition">
+            <option value="start">펜을 댄 직후 움직이지 않을 때만</option>
+            <option value="anytime">필기 도중 멈춰도</option>
           </select>
         </div>
+      </section>
+
+      <section>
+        <h3>S Pen</h3>
         <div class="row"><span>호버 중 버튼 입력도 사용<small>펜을 띄운 채 버튼을 누를 때 브라우저가 신호를 보내는 기기에서만 동작</small></span><input type="checkbox" class="switch" data-setting="penHoverButton"></div>
         <div class="row"><span>필압</span><input type="checkbox" class="switch" data-setting="pressure"></div>
         <div class="row"><span>손떨림 보정 <b data-out="smoothing"></b></span><input type="range" min="0" max="10" step="1" data-setting="smoothing"></div>
         <div class="row"><span>입력 예측 (지연 감소)</span><input type="checkbox" class="switch" data-setting="prediction"></div>
-      </section>
-
-      <section>
-        <h3>정지 감지 (펜을 대고 멈추면 도구 메뉴)</h3>
-        <div class="row"><span>사용</span><input type="checkbox" class="switch" data-setting="holdEnabled"></div>
-        <div class="row"><span>판정 시간 <b data-out="holdMs"></b></span><input type="range" min="300" max="5000" step="50" data-setting="holdMs"></div>
-        <div class="row"><span>허용 이동 거리 <b data-out="holdTolerance"></b></span><input type="range" min="1" max="30" step="1" data-setting="holdTolerance"></div>
-        <div class="row"><span>펜 두 번 탭 = 도구 메뉴<small>같은 곳을 빠르게 두 번 탭. 버튼 신호를 브라우저가 받지 못하는 기기의 대안</small></span><input type="checkbox" class="switch" data-setting="penDoubleTap"></div>
-        <div class="row"><span>표시 조건</span>
-          <select data-setting="holdCondition">
-            <option value="start">펜을 댄 직후 움직이지 않을 때만</option>
-            <option value="anytime">필기 도중 멈춰도 표시</option>
-          </select>
-        </div>
       </section>
 
       <section>
@@ -214,8 +207,6 @@
         <div class="row"><span>펜을 뗀 뒤 터치 무시 <b data-out="penGuardMs"></b></span><input type="range" min="0" max="1500" step="50" data-setting="penGuardMs"></div>
         <div class="row"><span>펜이 떠 있는 동안 새 터치 무시<small>펜을 든 손으로 화면을 짚는 습관이 있을 때. 다른 손 이동도 막힐 수 있음</small></span><input type="checkbox" class="switch" data-setting="hoverGuard"></div>
         <div class="row"><span>펜 직전 손바닥 이동 되돌리기</span><input type="checkbox" class="switch" data-setting="undoRestorePan"></div>
-        <div class="row"><span>두 손가락 탭 = 실행 취소</span><input type="checkbox" class="switch" data-setting="twoFingerUndo"></div>
-        <div class="row"><span>세 손가락 탭 = 다시 실행</span><input type="checkbox" class="switch" data-setting="threeFingerRedo"></div>
         <div class="row"><span>관성 스크롤</span><input type="checkbox" class="switch" data-setting="inertia"></div>
       </section>
 
