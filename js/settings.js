@@ -21,6 +21,8 @@ export const GESTURE_ACTIONS = [
   ['tool:text', '텍스트'],
   ['tool:shape', '도형'],
   ['tool:link', '링크'],
+  ['insertImage', '그림 넣기'],
+  ['insertNote', '포스트잇 붙이기'],
   ['toggleFinger', '손가락 쓰기 켜기/끄기'],
   ['toggleRuler', '자 켜기/끄기'],
   ['toggleProt', '각도기 켜기/끄기'],
@@ -68,6 +70,7 @@ export const DEFAULTS = {
   eraser: { mode: 'stroke', size: 16, autoReturn: false, text: false }, // stroke | area, size: 화면 px, autoReturn: 한 번 지우면 이전 도구로, text: 텍스트도 지우기
   shape: { kind: 'rect', color: '#1e63d6', width: 2 },
   text: { color: '#111111', size: 16 },
+  note: { color: '#fff59d' }, // 포스트잇 색
   lasso: {},
 
   // 제스처 → 동작 (GESTURE_ACTIONS 의 id)

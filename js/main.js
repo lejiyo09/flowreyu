@@ -9,7 +9,7 @@ import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -434,7 +434,7 @@ async function exportPdf() {
     }
     const { exportAnnotatedPdf } = await import('./export.js');
     const bytes = await exportAnnotatedPdf(await state.blob.arrayBuffer(), viewer.pages.map((p) => p.vt), (i) => doc.items(i),
-      (i, n) => busy(`PDF 만드는 중… ${i}/${n}`));
+      (i, n) => busy(`PDF 만드는 중… ${i}/${n}`), { getBlob: (id) => store.getBlob(id) });
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -543,6 +543,102 @@ function placeAddPageButton() {
   Object.assign(addEndBtn.style, { left: last.x + 'px', top: last.y + last.h + 16 + 'px', width: last.w + 'px', height: '40px' });
 }
 viewer.on('sized', placeAddPageButton);
+
+// ───────────────────────────── 그림 · 포스트잇 ─────────────────────────────
+
+// 그림은 blobs 스토어에서 읽어 ImageBitmap 으로 캐시 (ink.js 가 그릴 때 요청)
+imageHooks.load = async (id) => {
+  const rec = await store.getBlob(id);
+  return rec ? createImageBitmap(rec.data) : null;
+};
+imageHooks.ready = (id) => {
+  viewer.requestInk();
+  const d = state.doc;
+  if (d) for (const [p, items] of d.pages) if (items.some((i) => i.t === 'im' && i.blob === id)) thumbs.markInk(p);
+};
+
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+}
+
+const MAX_IMAGE_SIDE = 2400; // 저장 공간을 아끼기 위해 긴 변을 이 크기로 줄인다
+
+/** 그림 파일 → (필요하면 축소·재압축) → 저장 → 현재 화면 가운데에 배치 */
+async function insertImageFile(file, at) {
+  const doc = state.doc;
+  if (!doc || !file || !/^image\//.test(file.type)) return;
+  busy('그림 넣는 중…');
+  try {
+    let bmp = await createImageBitmap(file);
+    let blob = file, w = bmp.width, h = bmp.height;
+    const big = Math.max(w, h) > MAX_IMAGE_SIDE;
+    const odd = !/^image\/(png|jpeg)$/.test(file.type); // PDF 내보내기는 PNG/JPEG 만 직접 넣을 수 있음
+    if (big || odd) {
+      const k = Math.min(1, MAX_IMAGE_SIDE / Math.max(w, h));
+      w = Math.round(w * k); h = Math.round(h * k);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+      const type = file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png';
+      blob = await new Promise((r) => c.toBlob(r, type, 0.9));
+      bmp.close?.();
+      bmp = await createImageBitmap(blob);
+    }
+    const id = uid('img');
+    await store.putBlob({ id, docId: doc.id, data: blob, w, h });
+    putImage(id, bmp);
+    // 놓을 위치: 지정 위치(붙여넣기/끌어놓기) 또는 화면 가운데의 페이지
+    const hit = (at && viewer.pageAtScreen(at.x, at.y)) || viewer.pageAtScreen(viewer.vw / 2, viewer.vh / 2) || { page: viewer.currentPage(), x: 50, y: 50 };
+    const p = viewer.pages[hit.page];
+    const s = Math.min((p.w * 0.6) / w, (p.h * 0.5) / h, 1); // 페이지 폭 60%·높이 50% 안, 원본보다 키우지 않음
+    const iw = w * s, ih = h * s;
+    const x = clamp(hit.x - iw / 2, 0, Math.max(0, p.w - iw)), y = clamp(hit.y - ih / 2, 0, Math.max(0, p.h - ih));
+    const item = { id: uid('im'), t: 'im', x, y, w: iw, h: ih, blob: id };
+    doc.add(hit.page, item);
+    selectAfterInsert(hit.page, item.id);
+    toast('그림을 넣었습니다 · 끌어서 옮기고 오른쪽 아래 점으로 크기 조절', { ms: 2500 });
+  } catch (e) {
+    console.error(e);
+    toast('그림을 넣을 수 없습니다: ' + store.describeError(e), { error: true });
+  } finally { busy(null); }
+}
+
+/** 넣은 개체를 올가미 선택 상태로 → 바로 옮기기·크기 조절 */
+function selectAfterInsert(page, id) {
+  selectTool('lasso');
+  tools.setSelection({ page, ids: new Set([id]) });
+}
+
+function insertNote(at) {
+  const doc = state.doc;
+  if (!doc) return;
+  const hit = (at && viewer.pageAtScreen(at.x, at.y)) || viewer.pageAtScreen(viewer.vw / 2, viewer.vh / 2) || { page: viewer.currentPage(), x: 50, y: 50 };
+  const p = viewer.pages[hit.page];
+  const z = viewer.cam.z;
+  const size = Math.min(200 / z, p.w * 0.6), fs = 16 / z;
+  const x = clamp(hit.x - size / 2, 0, Math.max(0, p.w - size)), y = clamp(hit.y - size / 2, 0, Math.max(0, p.h - size));
+  const item = { id: uid('nt'), t: 'nt', x, y, w: size, h: size, c: settings.get('note').color, fs, text: '' };
+  doc.add(hit.page, item);
+  startTextEdit(hit.page, item);
+}
+
+$('#btnImage').addEventListener('click', () => $('#imageInput').click());
+$('#imageInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; insertImageFile(f); });
+$('#btnNote').addEventListener('click', () => insertNote());
+// 붙여넣기(Ctrl+V)와 끌어 놓기로도 그림 넣기
+document.addEventListener('paste', (e) => {
+  if (state.screen !== 'editor' || state.editing || e.target.closest?.('input, textarea')) return;
+  const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'));
+  if (f) { e.preventDefault(); insertImageFile(f); }
+});
+$('#viewport').addEventListener('dragover', (e) => { if (state.doc) e.preventDefault(); });
+$('#viewport').addEventListener('drop', (e) => {
+  const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith('image/'));
+  if (!f || !state.doc) return;
+  e.preventDefault();
+  e.stopPropagation();
+  insertImageFile(f, viewer.clientToScreen(e.clientX, e.clientY));
+});
 
 // ───────────────────────────── 링크 ─────────────────────────────
 
@@ -847,7 +943,7 @@ function renderToolPopup(tool) {
     const ar = h(`<div class="row"><span>한 번 지우면 이전 도구로</span><input type="checkbox" class="switch" ${er.autoReturn ? 'checked' : ''}></div>`);
     ar.querySelector('input').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
     pop.appendChild(ar);
-    const tx = h(`<div class="row"><span>텍스트도 지우기<small class="muted" style="display:block;font-size:11px">끄면 텍스트는 지우개에 지워지지 않음 (올가미로 삭제)</small></span><input type="checkbox" class="switch" ${er.text ? 'checked' : ''}></div>`);
+    const tx = h(`<div class="row"><span>텍스트·링크·그림·포스트잇도 지우기<small class="muted" style="display:block;font-size:11px">끄면 이런 개체는 지우개에 지워지지 않음 (올가미로 삭제)</small></span><input type="checkbox" class="switch" ${er.text ? 'checked' : ''}></div>`);
     tx.querySelector('input').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), text: e.target.checked }));
     pop.appendChild(tx);
     const clr = h('<div class="row"><span>현재 페이지</span><button class="btn sm danger">페이지 필기 모두 지우기</button></div>');
@@ -896,6 +992,8 @@ function runAction(action, sx, sy, source) {
       brief(TOOL_NAMES[to]);
       break;
     }
+    case 'insertImage': $('#imageInput').click(); break;
+    case 'insertNote': insertNote({ x: sx, y: sy }); break;
     case 'toggleFinger': $('#btnFinger').click(); break;
     case 'toggleRuler': $('#btnRuler').click(); break;
     case 'toggleProt': $('#btnProt').click(); break;
@@ -973,7 +1071,15 @@ function positionOverlays() {
       menu.hidden = !!dragging;
       if (!dragging) {
         const colors = menu.querySelector('.sel-colors');
-        if (!colors.childElementCount) for (const c of PEN_COLORS.slice(0, 5)) colors.appendChild(swatch(c, false, () => tools.recolorSelection(c)));
+        const selItems = state.doc.items(sel.page).filter((i) => sel.ids.has(i.id));
+        const kind = selItems.length && selItems.every((i) => i.t === 'nt') ? 'note' : 'ink';
+        if (colors.dataset.kind !== kind) {
+          colors.dataset.kind = kind;
+          colors.innerHTML = '';
+          for (const c of kind === 'note' ? NOTE_COLORS.slice(0, 5) : PEN_COLORS.slice(0, 5)) colors.appendChild(swatch(c, false, () => tools.recolorSelection(c)));
+        }
+        // 글상자/포스트잇 하나만 선택했으면 "편집" 버튼
+        menu.querySelector('[data-sel=edit]').hidden = !(selItems.length === 1 && (selItems[0].t === 'tx' || selItems[0].t === 'nt'));
         const mw = menu.offsetWidth, mh = menu.offsetHeight;
         let top = a.y - mh - 10;
         if (top < 6) top = a.y + hh * z + 10;
@@ -989,6 +1095,11 @@ $('#selMenu').addEventListener('click', (e) => {
   if (a === 'delete') tools.deleteSelection();
   if (a === 'dup') tools.duplicateSelection();
   if (a === 'clear') tools.clearSelection();
+  if (a === 'edit') {
+    const sel = tools.selection;
+    const it = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id));
+    if (it) { tools.clearSelection(); startTextEdit(sel.page, it); }
+  }
 });
 
 // ───────────────────────────── 텍스트 편집 ─────────────────────────────
@@ -998,8 +1109,9 @@ function startTextEdit(page, item, x, y) {
   commitTextEdit();
   const cfg = settings.get('text');
   state.editing = item
-    ? { page, item, x: item.x, y: item.y, fs: item.fs, c: item.c }
+    ? { page, item, x: item.x, y: item.y, fs: item.fs, c: item.t === 'nt' ? '#2b2b2b' : item.c, note: item.t === 'nt' }
     : { page, item: null, x, y: y - cfg.size * 0.65, fs: cfg.size, c: cfg.color };
+  te.classList.toggle('note-editor', !!state.editing.note);
   if (item) { viewer.hidden = new Set([item.id]); viewer.requestInk(); }
   te.value = item ? item.text : '';
   te.hidden = false;
@@ -1012,6 +1124,16 @@ function positionTextEditor() {
   if (!ed) return;
   const z = viewer.cam.z;
   const a = viewer.pageToScreen(ed.page, ed.x, ed.y);
+  if (ed.note) {
+    // 포스트잇 안쪽에 맞춘 자동 줄바꿈 입력칸
+    const it = ed.item;
+    Object.assign(te.style, {
+      left: a.x + NOTE_PAD * z + 'px', top: a.y + (NOTE_PAD + 4) * z + 'px',
+      width: (it.w - NOTE_PAD * 2) * z + 'px', height: (it.h - NOTE_PAD * 2 - 4) * z + 'px',
+      fontSize: ed.fs * z + 'px', lineHeight: TEXT_LINE, color: ed.c, fontFamily: TEXT_FONT,
+    });
+    return;
+  }
   const L = textLayout({ text: te.value || ' ', fs: ed.fs });
   Object.assign(te.style, {
     left: a.x - 2 + 'px', top: a.y - 2 + 'px',
@@ -1033,7 +1155,11 @@ function commitTextEdit() {
   te.blur();
   if (!doc) return;
   const items = doc.items(ed.page);
-  if (ed.item) {
+  if (ed.note) {
+    // 포스트잇은 글이 비어도 남겨 둔다 (펜으로 쓰는 메모지로도 사용)
+    const cur = items.find((i) => i.id === ed.item.id);
+    if (cur && cur.text !== text) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, text } : i)));
+  } else if (ed.item) {
     if (!text) doc.setItems(ed.page, items.filter((i) => i.id !== ed.item.id));
     else if (text !== ed.item.text) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, text } : i)));
   } else if (text) {
@@ -1107,7 +1233,14 @@ $('#btnBackupExport').addEventListener('click', async () => {
   await d.flush();
   const pages = {};
   for (const [p, items] of d.pages) if (items.length) pages[p] = items;
-  const data = { format: 'flexnote-ink', version: 1, name: d.meta.name, pageCount: viewer.pages.length, exported: new Date().toISOString(), pages };
+  // 첨부 그림도 백업 파일 안에 넣는다 (다른 기기로 옮겨도 그림이 따라가도록)
+  const images = {};
+  for (const items of Object.values(pages)) for (const it of items) {
+    if (it.t !== 'im' || images[it.blob]) continue;
+    const rec = await store.getBlob(it.blob).catch(() => null);
+    if (rec) images[it.blob] = { w: rec.w, h: rec.h, data: await blobToDataUrl(rec.data) };
+  }
+  const data = { format: 'flexnote-ink', version: 2, name: d.meta.name, pageCount: viewer.pages.length, exported: new Date().toISOString(), pages, images };
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   a.download = `${d.meta.name}_필기백업.json`;
@@ -1124,6 +1257,10 @@ $('#backupInput').addEventListener('change', async (e) => {
     const data = JSON.parse(await f.text());
     if (data.format !== 'flexnote-ink' || typeof data.pages !== 'object') throw new Error('FlexNote 필기 백업 파일이 아닙니다');
     if (!confirm(`백업의 필기를 현재 문서에 덮어쓸까요? (실행 취소 가능)`)) return;
+    for (const [id, im] of Object.entries(data.images || {})) {
+      const blob = await (await fetch(im.data)).blob();
+      await store.putBlob({ id, docId: d.id, data: blob, w: im.w, h: im.h });
+    }
     d.begin();
     let n = 0, bad = 0;
     for (let p = 0; p < viewer.pages.length; p++) {

@@ -3,9 +3,10 @@
 // files: PDF 원본 {id, data: Blob}
 // pages: 페이지별 필기 {docId, page, items, rev, saved}  (키: [docId, page])
 // kv   : 기타 {k, v}  (예: lastDoc)
+// blobs: 첨부 그림 {id, docId, data: Blob, w, h}  (필기 레코드에는 id 만 저장 → 자동 저장이 가볍다)
 
 const DB_NAME = 'flexnote';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // 2: blobs 스토어 추가 (기존 데이터 유지)
 let dbPromise = null;
 
 function req2p(req) {
@@ -36,6 +37,10 @@ export function openDB() {
         s.createIndex('byDoc', 'docId');
       }
       if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'k' });
+      if (!db.objectStoreNames.contains('blobs')) {
+        const b = db.createObjectStore('blobs', { keyPath: 'id' });
+        b.createIndex('byDoc', 'docId');
+      }
     };
     req.onsuccess = () => {
       const db = req.result;
@@ -133,8 +138,21 @@ export async function replaceDocStructure(docId, blob, records, docPatch) {
   return tx2p(tx);
 }
 
+export async function putBlob(rec) {
+  const tx = await store('blobs', 'readwrite');
+  tx.objectStore('blobs').put(rec);
+  return tx2p(tx);
+}
+
+export async function getBlob(id) {
+  const tx = await store('blobs');
+  return req2p(tx.objectStore('blobs').get(id));
+}
+
 export async function deleteDoc(id) {
-  const tx = await store(['docs', 'files', 'pages', 'kv'], 'readwrite');
+  const tx = await store(['docs', 'files', 'pages', 'kv', 'blobs'], 'readwrite');
+  const bkeys = await req2p(tx.objectStore('blobs').index('byDoc').getAllKeys(IDBKeyRange.only(id)));
+  for (const k of bkeys) tx.objectStore('blobs').delete(k);
   tx.objectStore('docs').delete(id);
   tx.objectStore('files').delete(id);
   const idx = tx.objectStore('pages').index('byDoc');

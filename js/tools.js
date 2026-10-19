@@ -3,7 +3,7 @@
 import { settings } from './settings.js';
 import {
   widthBucket, pressureFactor, roundPts, simplifyPts, hitTestSweep, eraseStrokePart,
-  insideLasso, bbox, transformItem, shapePolylines, hitTest,
+  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES,
 } from './ink.js';
 import { uid, dist, now } from './util.js';
 
@@ -312,8 +312,8 @@ class EraserTool {
       let out = null;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
-        // 텍스트는 지우개로 지우지 않는다 (올가미나 텍스트 편집으로 삭제). 설정으로 허용 가능
-        if (it.t === 'tx' && !c.eraseText) { if (out) out.push(it); continue; }
+        // 텍스트·링크·그림·포스트잇은 지우개로 지우지 않는다 (올가미로 삭제). 설정으로 허용 가능
+        if (OBJECT_TYPES.has(it.t) && !c.eraseText) { if (out) out.push(it); continue; }
         if (c.mode === 'area' && it.t === 's') {
           // 이동 구간을 잘게 나눠 부분 지우기
           let parts = [it];
@@ -503,7 +503,7 @@ class TextTool {
     const items = this.ctl.doc.items(c.page);
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      if (it.t === 'tx' && hitTest(it, p.x, p.y, 4)) { this.ctl.app.editText(c.page, it); return; }
+      if ((it.t === 'tx' || it.t === 'nt') && hitTest(it, p.x, p.y, 4)) { this.ctl.app.editText(c.page, it); return; }
     }
     this.ctl.app.editText(c.page, null, p.x, p.y);
   }

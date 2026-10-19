@@ -4,7 +4,7 @@ import {
   moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
   setStrokingRgbColor, setGraphicsState, drawObject,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
-import { strokeRuns, shapePolylines, textLayout, drawItem } from './ink.js';
+import { strokeRuns, shapePolylines, textLayout, drawItem, bbox } from './ink.js';
 
 function hexToRgb(hex) {
   let h = hex.replace('#', '');
@@ -33,7 +33,7 @@ function polylineOps(pts, width) {
  * @param pageTransforms Array<number[]> 페이지별 pdf.js viewport(scale 1).transform
  * @param getItems (pageIndex) => items[]
  */
-export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onProgress) {
+export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onProgress, { getBlob } = {}) {
   const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false });
   const pages = pdf.getPages();
   const gs = (page, key, dict) => {
@@ -54,13 +54,14 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     const ordered = [...items.filter((it) => it.t === 's' && it.tool === 'hl'), ...items.filter((it) => !(it.t === 's' && it.tool === 'hl'))];
     for (const it of ordered) {
       if (it.t === 'ln') { addLinkAnnot(pdf, pages, page, inv, it); continue; }
-      if (it.t === 'tx') {
-        const img = await textImage(pdf, it);
-        if (!img) continue;
-        const L = textLayout(it);
-        const xo = page.node.newXObject('Tx', img.ref);
+      if (it.t === 'tx' || it.t === 'nt' || it.t === 'im') {
+        // 글상자·포스트잇은 그림으로 렌더링(한글 글꼴 문제 없음), 첨부 그림은 원본 그대로
+        const placed = it.t === 'im' ? await embedAttachedImage(pdf, it, getBlob) : await renderItemImage(pdf, it);
+        if (!placed) continue;
+        const { img, box } = placed;
+        const xo = page.node.newXObject('Im', img.ref);
         // 이미지 단위 정사각형 → 뷰포트 좌표 (x, y + h)에서 위로 뒤집기
-        ops.push(pushGraphicsState(), setGraphicsState(gsNormal), concatTransformationMatrix(L.w, 0, 0, -L.h, it.x, it.y + L.h), drawObject(xo), popGraphicsState());
+        ops.push(pushGraphicsState(), setGraphicsState(gsNormal), concatTransformationMatrix(box.w, 0, 0, -box.h, box.x, box.y + box.h), drawObject(xo), popGraphicsState());
         continue;
       }
       const [r, g, b] = hexToRgb(it.c);
@@ -89,20 +90,31 @@ function addLinkAnnot(pdf, pages, page, inv, it) {
   page.node.addAnnot(pdf.context.register(pdf.context.obj(dict)));
 }
 
-async function textImage(pdf, it) {
-  const L = textLayout(it);
+/** 글상자/포스트잇을 고해상도 PNG 로 그려 넣는다 (포스트잇 그림자 여백 포함) */
+async function renderItemImage(pdf, it) {
+  const b = it.t === 'tx' ? (() => { const L = textLayout(it); return { x: it.x, y: it.y, w: L.w, h: L.h }; })() : bbox(it);
+  const m = it.t === 'nt' ? 8 : 0;
+  const box = { x: b.x - m, y: b.y - m, w: b.w + m * 2, h: b.h + m * 2 };
   const scale = 4;
   const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.ceil(L.w * scale));
-  c.height = Math.max(1, Math.ceil(L.h * scale));
+  c.width = Math.max(1, Math.ceil(box.w * scale));
+  c.height = Math.max(1, Math.ceil(box.h * scale));
   const ctx = c.getContext('2d');
   ctx.scale(scale, scale);
-  ctx.translate(-it.x, -it.y);
+  ctx.translate(-box.x, -box.y);
   drawItem(ctx, it);
   const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
   if (!blob) return null;
-  const img = await pdf.embedPng(await blob.arrayBuffer());
-  return img;
+  return { img: await pdf.embedPng(await blob.arrayBuffer()), box };
+}
+
+/** 첨부 그림 원본(PNG/JPEG)을 그대로 넣는다 */
+async function embedAttachedImage(pdf, it, getBlob) {
+  const rec = getBlob ? await getBlob(it.blob).catch(() => null) : null;
+  if (!rec) return null;
+  const bytes = await rec.data.arrayBuffer();
+  const img = rec.data.type === 'image/jpeg' ? await pdf.embedJpg(bytes) : await pdf.embedPng(bytes);
+  return { img, box: { x: it.x, y: it.y, w: it.w, h: it.h } };
 }
 
 /** 속지 그리기 (pdf-lib 페이지에). template: blank | lined | grid | dot */

@@ -368,3 +368,4 @@ input[type=range] { accent-color: var(--accent); }
   .back-chip { top: 8px; left: 8px; }
   .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
+.text-editor.note-editor { white-space: pre-wrap; overflow-y: auto; background: transparent; border: 1.5px dashed rgba(0,0,0,0.25); word-break: break-word; }

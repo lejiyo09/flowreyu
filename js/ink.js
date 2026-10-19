@@ -8,6 +8,12 @@
 //  shape  : {id, t:'sh', kind:'line'|'arrow'|'rect'|'ellipse', c, w, x1,y1,x2,y2}
 //  text   : {id, t:'tx', x, y, c, fs, text}
 //  link   : {id, t:'ln', x, y, w, h, to:{page}|{url}}  (손가락 탭으로 이동하는 사용자 링크 영역)
+//  image  : {id, t:'im', x, y, w, h, blob}            (blob = IndexedDB blobs 스토어의 id, 이미지 자체는 따로 저장)
+//  note   : {id, t:'nt', x, y, w, h, c(배경), fs, text} (포스트잇)
+
+/** 지우개가 건드리지 않는 "개체" 종류 (설정의 "개체도 지우기"로 허용) */
+export const OBJECT_TYPES = new Set(['tx', 'ln', 'im', 'nt']);
+export const NOTE_COLORS = ['#fff59d', '#ffcc80', '#f8bbd0', '#b3e5fc', '#c5e1a5', '#e1bee7'];
 import { distToSegment, pointInPolygon, uid } from './util.js';
 
 const cache = new WeakMap(); // item -> {bbox, path, polys}
@@ -131,7 +137,7 @@ function computeBBox(item) {
     const L = textLayout(item);
     return { x: item.x, y: item.y, w: L.w, h: L.h };
   }
-  if (item.t === 'ln') return { x: item.x, y: item.y, w: item.w, h: item.h };
+  if (item.t === 'ln' || item.t === 'im' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -193,6 +199,10 @@ export function drawItem(ctx, item) {
     ctx.stroke(itemPath(item));
   } else if (item.t === 'ln') {
     drawLink(ctx, item);
+  } else if (item.t === 'im') {
+    drawImage(ctx, item);
+  } else if (item.t === 'nt') {
+    drawNote(ctx, item);
   } else if (item.t === 'tx') {
     const L = textLayout(item);
     ctx.fillStyle = item.c;
@@ -202,6 +212,91 @@ export function drawItem(ctx, item) {
       ctx.fillText(L.lines[i], item.x, item.y + i * item.fs * TEXT_LINE + item.fs * (TEXT_LINE - 1) / 2);
     }
   }
+}
+
+// ── 그림 ──
+// 이미지는 비동기로 읽어 오므로 캐시에 없으면 자리 표시를 그리고, 다 읽히면 onImageReady 로 다시 그리게 한다.
+const imageCache = new Map(); // blobId -> ImageBitmap | 'loading' | 'error'
+export const imageHooks = { load: null, ready: null }; // main.js 가 연결: load(blobId) → Promise<ImageBitmap>
+
+export function getImage(id) {
+  const hit = imageCache.get(id);
+  if (hit && hit !== 'loading' && hit !== 'error') return hit;
+  if (!hit && imageHooks.load) {
+    imageCache.set(id, 'loading');
+    imageHooks.load(id).then((bmp) => { imageCache.set(id, bmp || 'error'); imageHooks.ready?.(id); })
+      .catch(() => { imageCache.set(id, 'error'); imageHooks.ready?.(id); });
+  }
+  return null;
+}
+export function putImage(id, bmp) { imageCache.set(id, bmp); }
+
+function drawImage(ctx, item) {
+  const bmp = getImage(item.blob);
+  if (bmp) { ctx.drawImage(bmp, item.x, item.y, item.w, item.h); return; }
+  const failed = imageCache.get(item.blob) === 'error';
+  ctx.fillStyle = failed ? 'rgba(229,72,77,0.08)' : 'rgba(120,130,150,0.12)';
+  ctx.fillRect(item.x, item.y, item.w, item.h);
+  ctx.strokeStyle = 'rgba(120,130,150,0.6)';
+  ctx.lineWidth = 0.8;
+  ctx.strokeRect(item.x, item.y, item.w, item.h);
+  ctx.fillStyle = 'rgba(90,100,120,0.8)';
+  ctx.font = `${Math.max(6, Math.min(14, item.h / 6))}px ${TEXT_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(failed ? '그림을 불러올 수 없음' : '그림 불러오는 중…', item.x + item.w / 2, item.y + item.h / 2);
+  ctx.textAlign = 'start';
+}
+
+// ── 포스트잇 ──
+export const NOTE_PAD = 8;
+
+/** 포스트잇 안의 글 줄바꿈 (폭에 맞춰 자동 줄바꿈 + 직접 줄바꿈) */
+export function noteLines(item) {
+  const e = entry(item);
+  if (e.lines) return e.lines;
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  measureCtx.font = `${item.fs}px ${TEXT_FONT}`;
+  const maxW = Math.max(item.w - NOTE_PAD * 2, item.fs);
+  const out = [];
+  for (const para of String(item.text || '').split('\n')) {
+    let line = '';
+    for (const ch of [...para]) {
+      if (line && measureCtx.measureText(line + ch).width > maxW) {
+        // 공백에서 끊을 수 있으면 단어 단위로
+        const sp = line.lastIndexOf(' ');
+        if (sp > 0 && ch !== ' ') { out.push(line.slice(0, sp)); line = line.slice(sp + 1) + ch; }
+        else { out.push(line); line = ch === ' ' ? '' : ch; }
+      } else line += ch;
+    }
+    out.push(line);
+  }
+  e.lines = out;
+  return out;
+}
+
+function drawNote(ctx, item) {
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.22)';
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = item.c;
+  ctx.fillRect(item.x, item.y, item.w, item.h);
+  ctx.restore();
+  // 윗부분 접착면 느낌
+  ctx.fillStyle = 'rgba(0,0,0,0.05)';
+  ctx.fillRect(item.x, item.y, item.w, Math.min(10, item.h * 0.12));
+  if (!item.text) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(item.x, item.y, item.w, item.h);
+  ctx.clip();
+  ctx.fillStyle = '#2b2b2b';
+  ctx.font = `${item.fs}px ${TEXT_FONT}`;
+  ctx.textBaseline = 'top';
+  const lines = noteLines(item);
+  for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], item.x + NOTE_PAD, item.y + NOTE_PAD + 4 + i * item.fs * TEXT_LINE);
+  ctx.restore();
 }
 
 export function linkLabel(item) {
@@ -243,7 +338,7 @@ export function samplePoints(item) {
 export function hitTest(item, x, y, r) {
   const b = bbox(item);
   if (x < b.x - r || x > b.x + b.w + r || y < b.y - r || y > b.y + b.h + r) return false;
-  if (item.t === 'tx' || item.t === 'ln') return true;
+  if (OBJECT_TYPES.has(item.t)) return true;
   if (item.t === 's') {
     const p = item.pts, half = (item.w / 2) * (item.pr ? 1.2 : 1);
     if (p.length === 3) return Math.hypot(p[0] - x, p[1] - y) <= r + half;
@@ -274,7 +369,7 @@ export function hitTestSweep(item, ax, ay, bx, by, r) {
 /** 올가미 다각형 안에 포함되는지 (대표 점 60% 이상) */
 export function insideLasso(item, poly) {
   const s = samplePoints(item);
-  if (item.t === 'tx' || item.t === 'ln') {
+  if (OBJECT_TYPES.has(item.t)) {
     const b = bbox(item);
     return pointInPolygon(b.x + b.w / 2, b.y + b.h / 2, poly);
   }
@@ -365,7 +460,8 @@ export function transformItem(item, m) {
   }
   if (item.t === 'sh') return { ...item, x1: X(item.x1), y1: Y(item.y1), x2: X(item.x2), y2: Y(item.y2), w: item.w * s };
   if (item.t === 'tx') return { ...item, x: X(item.x), y: Y(item.y), fs: item.fs * s };
-  if (item.t === 'ln') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s };
+  if (item.t === 'ln' || item.t === 'im') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s };
+  if (item.t === 'nt') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s, fs: item.fs * s };
   return item;
 }
 
@@ -391,6 +487,14 @@ export function sanitizeItem(raw) {
   if (raw.t === 'tx') {
     if (![raw.x, raw.y, raw.fs].every(fin) || typeof raw.text !== 'string') return null;
     return { id, t: 'tx', x: raw.x, y: raw.y, c, fs: raw.fs, text: raw.text };
+  }
+  if (raw.t === 'im') {
+    if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0 || typeof raw.blob !== 'string') return null;
+    return { id, t: 'im', x: raw.x, y: raw.y, w: raw.w, h: raw.h, blob: raw.blob };
+  }
+  if (raw.t === 'nt') {
+    if (![raw.x, raw.y, raw.w, raw.h, raw.fs].every(fin) || raw.w <= 0 || raw.h <= 0) return null;
+    return { id, t: 'nt', x: raw.x, y: raw.y, w: raw.w, h: raw.h, c, fs: raw.fs, text: typeof raw.text === 'string' ? raw.text : '' };
   }
   if (raw.t === 'ln') {
     if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0) return null;

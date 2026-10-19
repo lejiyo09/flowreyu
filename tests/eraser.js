@@ -70,7 +70,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   // 팝업에서 "텍스트도 지우기" 켜면 지워짐
   await page.click('#toolbar [data-tool=eraser]');
   await page.waitForSelector('#toolPopup:not([hidden])');
-  await page.locator('#toolPopup .row', { hasText: '텍스트도 지우기' }).locator('input').check();
+  await page.locator('#toolPopup .row', { hasText: '포스트잇도 지우기' }).locator('input').check();
   await page.keyboard.press('Escape');
   await page.evaluate(() => __flexnote.settings.set('eraser', { ...__flexnote.settings.get('eraser'), mode: 'stroke' }));
   await page.click('#toolbar [data-tool=eraser]');
