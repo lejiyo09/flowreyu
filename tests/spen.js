@@ -107,6 +107,27 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.waitForTimeout(400);
   check('H ghost touch cleared, pan works', await panWorks('H'));
 
+  // I. 펜 두 번 탭 → 메뉴, 첫 탭의 점은 사라지고 기록도 남지 않음
+  await page.waitForTimeout(500);
+  const nI = await items(), uI = await page.evaluate(() => __flexnote.state.doc.undoStack.length);
+  await h.pen(cdp, [[X(500), Y(650), 0.5]]);
+  await page.waitForTimeout(80);
+  await h.pen(cdp, [[X(503), Y(651), 0.5]]);
+  check('I pen double-tap opens menu', await menu());
+  check('I double-tap leaves no dots / history', (await items()) === nI && (await page.evaluate(() => __flexnote.state.doc.undoStack.length)) === uI);
+  await closeMenu();
+  // 느린 두 번 탭은 점 두 개 (메뉴 없음)
+  await h.pen(cdp, [[X(520), Y(650), 0.5]]);
+  await page.waitForTimeout(500);
+  await h.pen(cdp, [[X(521), Y(650), 0.5]]);
+  check('I slow taps = two dots, no menu', !(await menu()) && (await items()) === nI + 2);
+  // 떨어진 두 점(콜론)은 메뉴 아님
+  await page.waitForTimeout(500);
+  await h.pen(cdp, [[X(560), Y(640), 0.5]]);
+  await page.waitForTimeout(60);
+  await h.pen(cdp, [[X(560), Y(662), 0.5]]);
+  check('I colon-like dots (22px apart) stay dots', !(await menu()) && (await items()) === nI + 4);
+
   console.log(results.join('\n'));
   const errs = logs.filter((l) => /pageerror|\[error\]/.test(l));
   if (errs.length) console.log(errs.join('\n'));

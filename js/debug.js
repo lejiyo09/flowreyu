@@ -7,6 +7,7 @@ const TYPES = [
   'pointerenter', 'pointerleave', 'gotpointercapture', 'lostpointercapture',
   'mousedown', 'mouseup', 'auxclick', 'click', 'contextmenu',
   'touchstart', 'touchend', 'touchcancel',
+  'keydown', // S Pen 에어 액션 등이 키 입력으로 오는지 확인용
 ];
 const MAX = 400;
 
@@ -72,6 +73,7 @@ export class InputDebugger {
       touches: e.touches ? e.touches.length : '',
       coalesced: typeof e.getCoalescedEvents === 'function' && e.type === 'pointermove' ? e.getCoalescedEvents().length : '',
     };
+    if (e.type === 'keydown') r.pt = `key=${e.key} code=${e.code}`;
     this.rows.push(r);
     if (this.rows.length > MAX * 3) this.rows.splice(0, this.rows.length - MAX * 3);
     const key = `${r.type}|${r.pt}|b${r.button}|bs${r.buttons}`;

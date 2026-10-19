@@ -65,6 +65,15 @@ const app = {
   showZoom: () => showZoomBadge(),
   onSelection: (sel, dragging, m) => renderSelection(sel, dragging, m),
   editText: (page, item, x, y) => startTextEdit(page, item, x, y),
+  // 펜 두 번 탭 메뉴: 첫 탭이 남긴 편집을 기록 없이 되돌리기 위한 표식
+  historyMark: () => (state.doc ? { len: state.doc.undoStack.length, top: state.doc.undoStack[state.doc.undoStack.length - 1] } : null),
+  revertTo: (mark) => {
+    const d = state.doc;
+    if (!d || !mark) return;
+    while (d.undoStack.length > mark.len) { d.undo(); d.redoStack.pop(); }
+    tools.validateSelection();
+    updateHistoryButtons();
+  },
   toast,
 };
 const tools = new ToolController(viewer, app);

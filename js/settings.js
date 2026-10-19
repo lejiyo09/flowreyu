@@ -14,8 +14,9 @@ export const DEFAULTS = {
   penHoverButton: true, // 호버 중 버튼 입력(buttons=2)도 메뉴로 처리
   holdEnabled: true,
   holdMs: 700, // 300~5000
-  holdTolerance: 6, // CSS px
+  holdTolerance: 10, // CSS px (버튼을 누르면 펜 끝이 조금 움직이므로 여유 있게)
   holdCondition: 'start', // start: 펜을 댄 직후 움직이지 않을 때만 / anytime: 필기 도중 멈춰도
+  penDoubleTap: true, // 펜으로 같은 곳을 빠르게 두 번 탭 → 도구 메뉴 (버튼 신호를 주지 않는 기기의 대안)
   pressure: true,
   smoothing: 2, // 0~10
   prediction: true,
@@ -23,7 +24,7 @@ export const DEFAULTS = {
   // 팜 리젝션 / 터치
   fingerDraw: false, // 손가락으로 필기 (펜이 없는 기기용)
   palmSizeEnabled: true,
-  palmSize: 40, // 접촉면 지름(px) 이상이면 손바닥으로 간주
+  palmSize: 90, // 접촉면 지름(px) 이상이면 손바닥으로 간주 (실기기 손가락 43px 관측)
   penGuardMs: 300, // 펜을 뗀 뒤 이 시간 동안 새 터치를 무시
   hoverGuard: false, // 펜이 화면 위에 떠 있는 동안 새 터치 무시
   undoRestorePan: true, // 펜이 닿기 직전 시작된 한 손가락 이동은 되돌림
@@ -44,6 +45,7 @@ export const DEFAULTS = {
   lasso: {},
 
   debug: false,
+  sv: 2, // 설정 버전 (기본값 변경 시 마이그레이션)
 };
 
 function merge(base, over) {
@@ -56,6 +58,16 @@ function merge(base, over) {
     else if (typeof b === typeof o && (!Array.isArray(b) || Array.isArray(o))) out[k] = o;
   }
   return out;
+}
+
+/** 예전 기본값을 그대로 쓰던 사용자만 새 기본값으로 옮긴다 (직접 바꾼 값은 유지) */
+function migrate(saved) {
+  if (!saved || typeof saved !== 'object') return;
+  if ((saved.sv || 1) < 2) {
+    if (saved.palmSize === 40) saved.palmSize = 90; // 손가락(43px)을 손바닥으로 오판하던 값
+    if (saved.holdTolerance === 6) saved.holdTolerance = 10;
+    saved.sv = 2;
+  }
 }
 
 function sanitize(s) {
@@ -82,6 +94,7 @@ class Settings extends Emitter {
     this.persistOk = true;
     let saved = null;
     try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { this.persistOk = false; }
+    migrate(saved);
     this.v = sanitize(merge(structuredClone(DEFAULTS), saved));
   }
   get(k) { return this.v[k]; }

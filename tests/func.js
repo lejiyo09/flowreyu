@@ -75,8 +75,8 @@ const check = (name, ok, info = '') => { results.push(`${ok ? 'PASS' : 'FAIL'}  
   check('pen stroke still recorded with palm', (await ev(() => __flexnote.state.doc.totalItems())) === totalBefore + 1);
   // 큰 접촉면
   await page.waitForTimeout(500);
-  await h.touch(cdp, 'touchStart', [[X(700), Y(600), 3, 40]]);
-  for (let i = 1; i <= 5; i++) await h.touch(cdp, 'touchMove', [[X(700), Y(600 - i * 20), 3, 40]]);
+  await h.touch(cdp, 'touchStart', [[X(700), Y(600), 3, 60]]);
+  for (let i = 1; i <= 5; i++) await h.touch(cdp, 'touchMove', [[X(700), Y(600 - i * 20), 3, 60]]);
   await h.touch(cdp, 'touchEnd', []);
   const pc3 = await ev(() => ({ ...__flexnote.viewer.cam }));
   check('large contact (palm) ignored', pc3.ty === pc2.ty);

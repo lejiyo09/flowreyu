@@ -301,6 +301,7 @@ class PenInput {
     this.active = {
       id: e.pointerId, kind, t0: now(), lastAt: now(), sx0: s.x, sy0: s.y, ax: s.x, ay: s.y,
       moved: false, buttons: e.buttons, holdTimer: 0, toolOverride,
+      mark: this.r.app.historyMark?.(), // 두 번 탭이면 이 시점으로 되돌린다
     };
     viewer.pauseRender(true);
     this.tools.begin({ sx: s.x, sy: s.y, p: pressureOf(e, kind), kind, toolOverride, t: e.timeStamp });
@@ -356,6 +357,7 @@ class PenInput {
 
   onUp(e) {
     const a = this.active;
+    if (a && this.checkDoubleTap(a)) return;
     if (a && e.type === 'pointerup' && Number.isFinite(e.clientX)) {
       // pointerup 위치도 마지막 점으로 반영
       const s = this.r.screen(e);
@@ -368,6 +370,30 @@ class PenInput {
   onCancel() {
     // OS/브라우저가 취소한 입력(손바닥 판정 등): 획을 버린다
     this.end(true);
+  }
+
+  /**
+   * 펜 두 번 탭 → 도구 메뉴. 첫 탭이 만든 점(또는 지운 것)은 되돌리고 두 번째 탭은 그리지 않는다.
+   * 짧고(<250ms) 거의 움직이지 않은 접촉 두 번이 350ms 안에, 18px 안에서 (콜론 같은 점 찍기와 구분) 일어나야 한다.
+   */
+  checkDoubleTap(a) {
+    if (a.kind !== 'pen' || !settings.get('penDoubleTap')) return false;
+    const isTap = !a.moved && now() - a.t0 < 250;
+    const prev = this.lastTap;
+    this.lastTap = null;
+    if (!isTap) return false;
+    const tool = a.toolOverride || settings.get('tool');
+    if (prev && now() - prev.t < 350 && dist(prev.x, prev.y, a.sx0, a.sy0) < 18 && tool !== 'text') {
+      this.end(true);
+      this.r.app.revertTo?.(prev.mark);
+      this.r.consumed.add(a.id);
+      this.r.trace('펜 두 번 탭 → 메뉴');
+      this.r.openMenu(a.sx0, a.sy0, 'double-tap');
+      return true;
+    }
+    // 끝나는 시각 기준으로 다음 탭을 기다린다 (end 이후 기록)
+    queueMicrotask(() => { this.lastTap = { t: now(), x: a.sx0, y: a.sy0, mark: a.mark }; });
+    return false;
   }
 
   armHold() {
