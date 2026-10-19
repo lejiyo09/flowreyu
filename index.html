@@ -44,6 +44,7 @@
     <symbol id="i-fold" viewBox="0 0 24 24"><path d="M4.5 4.5h15v10l-5 5h-10z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 10.5l4 3 4-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><rect x="3.5" y="4" width="6" height="6" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4.8 7.2l1.3 1.3 2.4-2.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="14" width="6" height="6" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12.5 7h8M12.5 17h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 9.5h18M3 14.5h18M9 4.5v15M15 4.5v15" stroke="currentColor" stroke-width="1.4"/></symbol>
+    <symbol id="i-ai" viewBox="0 0 24 24"><path d="M12 3.5l1.9 4.6 4.6 1.9-4.6 1.9L12 16.5l-1.9-4.6L5.5 10l4.6-1.9z M18.5 15l.8 1.9 1.9.8-1.9.8-.8 1.9-.8-1.9-1.9-.8 1.9-.8z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></symbol>
     <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z" fill="currentColor"/></symbol>
     <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7" y="5.5" width="3.6" height="13" rx="1" fill="currentColor"/><rect x="13.4" y="5.5" width="3.6" height="13" rx="1" fill="currentColor"/></symbol>
@@ -90,6 +91,7 @@
       </div>
       <button class="page-ind" id="pageInd">1 / 1</button>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
+      <button class="icon-btn" id="btnAi" title="AI 도우미 (회의록·맞춤법·번역)"><svg><use href="#i-ai"/></svg></button>
       <button class="icon-btn" id="btnRec" title="음성 녹음"><svg><use href="#i-mic"/></svg></button>
       <button class="icon-btn" id="btnExport" title="PDF 내보내기"><svg><use href="#i-export"/></svg></button>
       <button class="icon-btn" id="btnSettings" title="설정"><svg><use href="#i-gear"/></svg></button>
@@ -199,6 +201,35 @@
     </div>
     <audio id="apAudio" preload="metadata"></audio>
   </div>
+  <div id="aiPanel" class="popup audio-panel ai-panel" data-ui hidden>
+    <div class="ap-head">
+      <b>AI 도우미</b>
+      <button class="icon-btn sm" id="aiClose" title="닫기"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="ai-nokey" id="aiNoKey" hidden>
+      <p class="small" style="margin:0">AI 기능은 본인의 Anthropic API 키가 필요합니다 (사용량만큼 요금 발생, 인터넷 필요).</p>
+      <button class="btn sm primary" id="aiOpenSettings">설정에서 키 입력</button>
+    </div>
+    <div class="ai-tabs seg" id="aiTabs">
+      <button value="minutes" class="on">회의록 정리·요약</button><button value="grammar">맞춤법·문법</button><button value="translate">번역</button>
+    </div>
+    <div class="ai-opts" id="aiOptMinutes">
+      <label class="row-line"><span>받아쓰기</span><select id="aiRec"></select></label>
+      <label class="row-line"><input type="checkbox" id="aiImage" checked> 현재 페이지(손글씨) 이미지 포함</label>
+    </div>
+    <div class="ai-opts" id="aiOptTranslate" hidden>
+      <label class="row-line"><span>번역할 언어</span><select id="aiLang"></select></label>
+    </div>
+    <p class="muted small" id="aiTarget" style="margin:0"></p>
+    <div class="ap-actions"><button class="btn primary" id="aiRun">실행</button><button class="btn" id="aiStop" hidden>중지</button></div>
+    <div class="ai-out" id="aiOut" hidden></div>
+    <div class="ap-actions" id="aiResultActions" hidden>
+      <button class="btn sm primary" id="aiApply" hidden>원문 바꾸기</button>
+      <button class="btn sm" id="aiAsNote">포스트잇으로 붙이기</button>
+      <button class="btn sm" id="aiTodos" hidden>할 일을 체크리스트로</button>
+      <button class="btn sm" id="aiCopy">복사</button>
+    </div>
+  </div>
   <div id="quickMenu" class="popup quick-menu" data-ui hidden>
     <div class="qm-tools">
       <button data-tool="pen" title="펜"><svg><use href="#i-pen"/></svg></button>
@@ -273,6 +304,14 @@
       <section>
         <h3>마우스</h3>
         <div class="row"><span>왼쪽 버튼으로 필기<small>끄면 왼쪽 드래그로 화면 이동</small></span><input type="checkbox" class="switch" data-setting="mouseDraw"></div>
+      </section>
+
+      <section>
+        <h3>AI 도우미 (Claude)</h3>
+        <div class="row"><span>Anthropic API 키<small>console.anthropic.com 에서 발급. 이 기기에만 저장되고 Anthropic 으로만 전송됩니다. 공용 기기에서는 입력하지 마세요.</small></span>
+          <span class="btns"><input type="password" id="setAiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" style="width:180px"><button type="button" class="btn sm" id="btnAiKeyClear">지우기</button></span></div>
+        <div class="row"><span>생각 깊이<small>높을수록 정확하지만 느리고 비용이 늘어남</small></span>
+          <select id="setAiEffort"><option value="low">빠르게</option><option value="medium">보통</option><option value="high">꼼꼼하게</option></select></div>
       </section>
 
       <section>

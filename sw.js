@@ -7,12 +7,13 @@
 //   (실행 중에 코드가 섞이지 않도록 자동 교체는 하지 않는다)
 
 // <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)
-const VERSION = 'd3059df4c557';
+const VERSION = 'a494254facd3';
 const PRECACHE = [
   "./",
   "index.html",
   "manifest.webmanifest",
   "css/app.css",
+  "js/ai.js",
   "js/audio.js",
   "js/debug.js",
   "js/document.js",
@@ -30,6 +31,7 @@ const PRECACHE = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/icon.svg",
+  "vendor/anthropic/sdk.mjs",
   "vendor/pdf-lib/pdf-lib.esm.min.js",
   "vendor/pdfjs/cmaps/78-EUC-H.bcmap",
   "vendor/pdfjs/cmaps/78-EUC-V.bcmap",

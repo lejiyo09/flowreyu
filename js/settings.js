@@ -26,6 +26,7 @@ export const GESTURE_ACTIONS = [
   ['insertChecklist', '체크리스트 넣기'],
   ['insertTable', '표 넣기'],
   ['toggleRecord', '녹음 시작/정지'],
+  ['aiPanel', 'AI 도우미 열기'],
   ['toggleFinger', '손가락 쓰기 켜기/끄기'],
   ['toggleRuler', '자 켜기/끄기'],
   ['toggleProt', '각도기 켜기/끄기'],
@@ -75,6 +76,7 @@ export const DEFAULTS = {
   text: { color: '#111111', size: 16 },
   note: { color: '#fff59d' }, // 포스트잇 색
   lasso: {},
+  ai: { effort: 'medium', lang: 'en' }, // AI 도우미 (API 키는 따로 저장: ai.js)
 
   // 제스처 → 동작 (GESTURE_ACTIONS 의 id)
   gestures: {
@@ -140,6 +142,7 @@ function sanitize(s) {
     const ok = ids.has(s.gestures[key]) || extra.some(([id]) => id === s.gestures[key]);
     if (!ok) s.gestures[key] = DEFAULTS.gestures[key];
   }
+  if (!['low', 'medium', 'high'].includes(s.ai.effort)) s.ai.effort = 'medium';
   if (!['start', 'anytime'].includes(s.holdCondition)) s.holdCondition = 'start';
   if (!['pen', 'hl', 'eraser', 'lasso', 'text', 'shape', 'link'].includes(s.tool)) s.tool = 'pen';
   return s;

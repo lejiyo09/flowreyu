@@ -395,3 +395,13 @@ input[type=range] { accent-color: var(--accent); }
 .ap-transcript button b { color: var(--accent); font-weight: 600; margin-right: 6px; font-variant-numeric: tabular-nums; }
 .ap-transcript button.now { background: var(--accent-soft); }
 .ap-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.ai-panel { width: min(420px, calc(100vw - 16px)); }
+.ai-tabs { display: flex; gap: 4px; }
+.ai-tabs button { flex: 1; font-size: 12.5px; padding: 6px 4px; }
+.ai-opts { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.ai-opts .row-line { display: flex; align-items: center; gap: 8px; }
+.ai-opts select { flex: 1; min-width: 0; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: inherit; }
+.ai-nokey { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; padding: 8px; border-radius: 10px; background: var(--accent-soft); }
+.ai-out { white-space: pre-wrap; overflow-y: auto; min-height: 60px; max-height: 40vh; font-size: 13px; line-height: 1.5; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); user-select: text; -webkit-user-select: text; }
+.ai-out.err { color: var(--danger); }
+.ai-out .ai-explain { display: block; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted, #888); }

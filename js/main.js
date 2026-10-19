@@ -8,9 +8,10 @@ import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { AudioRecorder, fmtTime } from './audio.js';
+import { askClaude, AiError, getApiKey, setApiKey, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -986,6 +987,225 @@ $('#apDelete').addEventListener('click', async () => {
   renderRecList();
 });
 
+// ───────────────────────────── AI 도우미 (회의록·맞춤법·번역) ─────────────────────────────
+
+let aiKind = 'minutes';
+let aiJob = null; // {ctrl, kind, page, pieces, outs, text, done}
+for (const [id, name] of TRANSLATE_LANGS) $('#aiLang').insertAdjacentHTML('beforeend', `<option value="${id}">${escapeHtml(name)}</option>`);
+
+async function openAiPanel() {
+  closeToolPopup();
+  $('#audioPanel').hidden = true;
+  $('#aiPanel').hidden = false;
+  $('#aiLang').value = settings.get('ai').lang;
+  $('#aiNoKey').hidden = !!getApiKey();
+  await fillAiRecSelect();
+  updateAiTarget();
+}
+function closeAiPanel() { $('#aiPanel').hidden = true; }
+$('#btnAi').addEventListener('click', () => { if ($('#aiPanel').hidden) openAiPanel(); else closeAiPanel(); });
+$('#aiClose').addEventListener('click', closeAiPanel);
+$('#aiOpenSettings').addEventListener('click', () => { closeAiPanel(); openSettings(); setTimeout(() => $('#setAiKey').focus(), 50); });
+$('#aiTabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+  aiKind = b.value;
+  $('#aiTabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+  updateAiTarget();
+}));
+$('#aiLang').addEventListener('change', (e) => settings.set('ai', { ...settings.get('ai'), lang: e.target.value }));
+
+async function fillAiRecSelect() {
+  const sel = $('#aiRec');
+  const list = state.doc ? (await store.listBlobs(state.doc.id, 'audio').catch(() => [])).filter((r) => r.segments?.length).sort((a, b) => b.created - a.created) : [];
+  sel.innerHTML = '<option value="">사용 안 함</option>' + list.map((r) => `<option value="${r.id}">${escapeHtml(r.name || '녹음')} · ${fmtTime(r.duration)} · ${r.segments.length}문장</option>`).join('');
+  sel.value = (player && list.some((r) => r.id === player.rec.id)) ? player.rec.id : (list[0]?.id || '');
+}
+
+/** AI 에 보낼 글 조각: 선택한 객체(없으면 현재 페이지)의 글상자·포스트잇·체크리스트 항목·표 칸 */
+function aiTextPieces(useSelection = true) {
+  const sel = useSelection ? tools.selection : null;
+  const page = sel ? sel.page : viewer.currentPage();
+  const pieces = [];
+  for (const it of state.doc?.items(page) || []) {
+    if (sel && !sel.ids.has(it.id)) continue;
+    if ((it.t === 'tx' || it.t === 'nt') && it.text?.trim()) pieces.push({ id: it.id, path: null, text: it.text });
+    else if (it.t === 'cl') it.rows.forEach((r, i) => { if (r.text.trim()) pieces.push({ id: it.id, path: ['rows', i], text: r.text }); });
+    else if (it.t === 'tb') it.cells.forEach((row, r) => row.forEach((cell, c) => { if (cell.trim()) pieces.push({ id: it.id, path: ['cells', r, c], text: cell }); }));
+  }
+  return { page, pieces, fromSel: !!sel };
+}
+
+function updateAiTarget() {
+  $('#aiOptMinutes').hidden = aiKind !== 'minutes';
+  $('#aiOptTranslate').hidden = aiKind !== 'translate';
+  if (!state.doc) return;
+  if (aiKind === 'minutes') {
+    $('#aiTarget').textContent = `${viewer.currentPage() + 1}쪽의 글·손글씨와 선택한 녹음의 받아쓰기로 회의록을 만듭니다.`;
+  } else {
+    const { page, pieces, fromSel } = aiTextPieces();
+    $('#aiTarget').textContent = pieces.length
+      ? `${fromSel ? '선택한 객체' : `${page + 1}쪽`}의 글 ${pieces.length}개 (글상자·포스트잇·체크리스트·표). 손글씨는 대상이 아닙니다.`
+      : `${fromSel ? '선택한 객체에' : `${page + 1}쪽에`} 글이 없습니다. 글상자·포스트잇·체크리스트·표의 글을 검사합니다.`;
+  }
+}
+
+/** 현재 페이지를 필기까지 그린 JPEG (base64). 긴 변 1568px 이하 */
+async function pageImageBase64(i) {
+  const p = viewer.pages[i];
+  const scale = Math.min(1568 / Math.max(p.w, p.h), 2.5);
+  const page = await viewer.pdf.getPage(i + 1);
+  const vp = page.getViewport({ scale: scale * (p.w / page.getViewport({ scale: 1 }).width) });
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+  const ctx = c.getContext('2d');
+  await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
+  const items = state.doc.items(i);
+  const folded = foldHidden(items);
+  const vis = folded ? items.filter((it) => !folded.has(it.id)) : items;
+  const s = c.width / p.w;
+  ctx.setTransform(s, 0, 0, s, 0, 0);
+  ctx.globalCompositeOperation = 'multiply';
+  for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it);
+  ctx.globalCompositeOperation = 'source-over';
+  for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it);
+  return c.toDataURL('image/jpeg', 0.88).split(',')[1]; // PNG 는 사진 많은 PDF 에서 이미지 한도(5MB)를 넘을 수 있음
+}
+
+function aiShow(text, { error = false, explain = '' } = {}) {
+  const out = $('#aiOut');
+  out.hidden = false;
+  out.classList.toggle('err', error);
+  out.textContent = text;
+  if (explain) { const e = document.createElement('span'); e.className = 'ai-explain'; e.textContent = explain; out.appendChild(e); }
+  out.scrollTop = out.scrollHeight;
+}
+
+async function runAi() {
+  if (!state.doc || aiJob?.running) return;
+  if (!getApiKey()) { $('#aiNoKey').hidden = false; return; }
+  const kind = aiKind;
+  const job = { kind, ctrl: new AbortController(), running: true };
+  aiJob = job;
+  $('#aiRun').disabled = true; $('#aiStop').hidden = false; $('#aiResultActions').hidden = true;
+  try {
+    let req;
+    if (kind === 'minutes') {
+      const page = viewer.currentPage();
+      const recId = $('#aiRec').value;
+      const rec = recId ? await store.getBlob(recId) : null;
+      const segments = rec?.segments || [];
+      const pageText = aiTextPieces(false).pieces.map((p) => p.text).join('\n');
+      const image = $('#aiImage').checked ? await pageImageBase64(page) : null;
+      if (!segments.length && !pageText.trim() && !image) throw new AiError('empty', '정리할 내용이 없습니다. 녹음 받아쓰기나 페이지 이미지를 포함하세요.');
+      req = minutesRequest({ segments, pageText, image, title: state.doc.meta.name, date: formatDate(rec?.created || Date.now()) });
+    } else {
+      const { page, pieces } = aiTextPieces();
+      if (!pieces.length) throw new AiError('empty', '검사할 글이 없습니다. 글상자·포스트잇·체크리스트·표를 올가미로 선택하거나 글이 있는 페이지에서 실행하세요.');
+      Object.assign(job, { page, pieces });
+      req = kind === 'grammar' ? grammarRequest(pieces.map((p) => p.text)) : translateRequest(pieces.map((p) => p.text), $('#aiLang').value);
+    }
+    aiShow('생각하는 중…');
+    const res = await askClaude({
+      ...req,
+      effort: settings.get('ai').effort,
+      signal: job.ctrl.signal,
+      onText: (_d, all) => { if (aiJob === job) aiShow(all); },
+    });
+    if (aiJob !== job) return;
+    job.text = res.text;
+    if (kind === 'minutes') {
+      aiShow(res.text + (res.truncated ? '\n\n(길이 제한으로 잘렸습니다)' : ''));
+      job.todos = extractTodos(res.text);
+    } else {
+      const { body, explain } = splitExplain(res.text);
+      job.outs = unpackTexts(body, job.pieces.length);
+      job.explain = explain;
+      if (job.outs) aiShow(job.outs.join('\n\n'), { explain });
+      else aiShow(res.text);
+    }
+    $('#aiResultActions').hidden = false;
+    $('#aiApply').hidden = !job.outs;
+    $('#aiApply').textContent = kind === 'grammar' ? '고친 글로 바꾸기' : '번역으로 바꾸기';
+    $('#aiTodos').hidden = !(kind === 'minutes' && job.todos?.length);
+  } catch (e) {
+    if (aiJob === job) aiShow(e.message || String(e), { error: true });
+  } finally {
+    job.running = false;
+    if (aiJob === job) { $('#aiRun').disabled = false; $('#aiStop').hidden = true; }
+  }
+}
+$('#aiRun').addEventListener('click', runAi);
+$('#aiStop').addEventListener('click', () => aiJob?.ctrl.abort());
+
+/** 결과를 원래 객체에 반영 (그 사이 사용자가 고친 조각은 건너뜀). 실행 취소 한 번으로 되돌릴 수 있다 */
+$('#aiApply').addEventListener('click', () => {
+  const job = aiJob, d = state.doc;
+  if (!job?.outs || !d) return;
+  const changes = new Map();
+  job.pieces.forEach((p, i) => { if (!changes.has(p.id)) changes.set(p.id, []); changes.get(p.id).push([p, job.outs[i]]); });
+  let n = 0, skipped = 0;
+  const items = d.items(job.page).map((it) => {
+    const ch = changes.get(it.id);
+    if (!ch) return it;
+    let next = it;
+    for (const [p, out] of ch) {
+      if (!p.path) {
+        if (it.text !== p.text) { skipped++; continue; }
+        next = { ...next, text: out };
+      } else if (p.path[0] === 'rows') {
+        if (it.rows[p.path[1]]?.text !== p.text) { skipped++; continue; }
+        const rows = next.rows === it.rows ? it.rows.map((r) => ({ ...r })) : next.rows;
+        rows[p.path[1]].text = out.replace(/\s*\n\s*/g, ' ');
+        next = { ...next, rows };
+      } else {
+        const [, r, c] = p.path;
+        if (it.cells[r]?.[c] !== p.text) { skipped++; continue; }
+        const cells = next.cells === it.cells ? it.cells.map((row) => [...row]) : next.cells;
+        cells[r][c] = out;
+        next = { ...next, cells };
+      }
+      n++;
+    }
+    return next;
+  });
+  if (n) d.setItems(job.page, items);
+  $('#aiApply').hidden = true;
+  toast(`${n}개를 바꿨습니다${skipped ? ` (그 사이 고친 ${skipped}개는 건너뜀)` : ''} · 실행 취소로 되돌릴 수 있음`);
+});
+
+/** 긴 글을 포스트잇으로 붙이기 (내용 길이에 맞춰 높이 계산) */
+function addTextNote(text, color = '#e1f5fe') {
+  const d = state.doc;
+  if (!d) return;
+  const hit = placeAt(), p = viewer.pages[hit.page], z = viewer.cam.z;
+  const w = Math.min(380 / z, p.w * 0.85), fs = 12 / z;
+  const perLine = Math.max(8, Math.floor((w - fs * 2) / (fs * 0.95)));
+  const lines = text.split('\n').reduce((s, l) => s + Math.max(1, Math.ceil(l.length / perLine)), 0);
+  const h = Math.min(Math.max(120 / z, (lines + 2) * fs * TEXT_LINE + noteTextTop({ h: 200 })), p.h * 0.95);
+  const item = { id: uid('nt'), t: 'nt', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, 0, p.h - h), w, h, c: color, fs, text };
+  d.add(hit.page, item);
+  toast('포스트잇으로 붙였습니다');
+}
+$('#aiAsNote').addEventListener('click', () => {
+  const job = aiJob;
+  if (!job?.text) return;
+  addTextNote(job.outs ? job.outs.join('\n\n') : job.text, job.kind === 'minutes' ? '#e1f5fe' : '#f1f8e9');
+});
+$('#aiTodos').addEventListener('click', () => {
+  const todos = aiJob?.todos, d = state.doc;
+  if (!todos?.length || !d) return;
+  const hit = placeAt(), p = viewer.pages[hit.page], z = viewer.cam.z;
+  const w = Math.min(300 / z, p.w * 0.8), fs = 14 / z;
+  const item = { id: uid('cl'), t: 'cl', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - fs * 2, 0, p.h - fs * 3), w, fs, c: '#1c1f24', rows: todos.map((text) => ({ text, done: false })) };
+  d.add(hit.page, item);
+  toast(`할 일 ${todos.length}개를 체크리스트로 넣었습니다`);
+});
+$('#aiCopy').addEventListener('click', async () => {
+  const job = aiJob;
+  if (!job?.text) return;
+  try { await navigator.clipboard.writeText(job.outs ? job.outs.join('\n\n') : job.text); toast('복사했습니다'); }
+  catch { toast('복사할 수 없습니다 (브라우저 권한)'); }
+});
+
 // ───────────────────────────── 링크 ─────────────────────────────
 
 let backAnchor = null;
@@ -1345,6 +1565,7 @@ function runAction(action, sx, sy, source) {
     case 'insertChecklist': insertChecklist({ x: sx, y: sy }); break;
     case 'insertTable': $('#tableDlg').showModal(); break;
     case 'toggleRecord': toggleRecording(); break;
+    case 'aiPanel': openAiPanel(); break;
     case 'toggleFinger': $('#btnFinger').click(); break;
     case 'toggleRuler': $('#btnRuler').click(); break;
     case 'toggleProt': $('#btnProt').click(); break;
@@ -1640,6 +1861,9 @@ function openSettings() {
   $('#btnBackupExport').disabled = $('#btnBackupImport').disabled = !state.doc;
   dlg.showModal();
 }
+$('#setAiKey').addEventListener('change', (e) => { setApiKey(e.target.value); $('#aiNoKey').hidden = !!getApiKey(); });
+$('#btnAiKeyClear').addEventListener('click', () => { setApiKey(''); $('#setAiKey').value = ''; toast('API 키를 지웠습니다'); });
+$('#setAiEffort').addEventListener('change', (e) => settings.set('ai', { ...settings.get('ai'), effort: e.target.value }));
 $('#setEraserReturn').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
 
 // 제스처 동작 선택 칸 (설정 → 제스처 동작)
@@ -1655,6 +1879,8 @@ for (const [key, label, hint, extra] of GESTURES) {
 function syncSettingsForm() {
   for (const sel of dlg.querySelectorAll('[data-gesture]')) sel.value = settings.get('gestures')[sel.dataset.gesture];
   $('#setEraserReturn').checked = !!settings.get('eraser').autoReturn;
+  $('#setAiKey').value = getApiKey();
+  $('#setAiEffort').value = settings.get('ai').effort;
   for (const el of dlg.querySelectorAll('[data-setting]')) {
     const k = el.dataset.setting, v = settings.get(k);
     if (el.classList.contains('seg')) el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.value === v));
