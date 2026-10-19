@@ -5,7 +5,7 @@ const check = (name, ok, info = '') => { results.push(`${ok ? 'PASS' : 'FAIL'}  
   const { browser, page, cdp, logs } = await h.launch();
   const ev = (f, a) => page.evaluate(f, a);
   const items = (p = 0) => page.evaluate((p) => __flexnote.state.doc.items(p).length, p);
-  await page.goto('http://localhost:8080/');
+  await page.goto(process.env.APP_URL || 'http://localhost:8080/');
   await page.waitForTimeout(600);
   await page.setInputFiles('#fileInput', h.S + '/sample.pdf');
   await page.waitForSelector('#editor:not([hidden])');

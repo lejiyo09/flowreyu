@@ -15,6 +15,9 @@ export class InputDebugger {
     this.panel = panel;
     this.list = panel.querySelector('.dbg-list');
     this.summary = panel.querySelector('.dbg-summary');
+    this.stateEl = panel.querySelector('.dbg-state');
+    this.getState = null; // () => 입력 엔진 상태 문자열
+    this._stateTimer = 0;
     this.rows = [];
     this.on = false;
     this.hideMoves = true;
@@ -37,7 +40,18 @@ export class InputDebugger {
       if (v) window.addEventListener(t, this._h, { capture: true, passive: true });
       else window.removeEventListener(t, this._h, { capture: true });
     }
-    if (v) this.render();
+    clearInterval(this._stateTimer);
+    if (v) {
+      this.render();
+      this._stateTimer = setInterval(() => { if (this.getState) this.stateEl.textContent = this.getState(); }, 200);
+    }
+  }
+
+  /** 입력 엔진의 판정 이유를 로그에 함께 남긴다 */
+  note(msg) {
+    if (!this.on) return;
+    this.rows.push({ t: Math.round(performance.now() - this.t0), type: 'note', msg });
+    if (!this._pending) { this._pending = true; requestAnimationFrame(() => { this._pending = false; this.render(); }); }
   }
 
   record(e) {
@@ -69,8 +83,9 @@ export class InputDebugger {
     if (!this.on) return;
     const rows = (this.hideMoves ? this.rows.filter((r) => r.type !== 'pointermove' || r.buttons > 1 || r.button > 0) : this.rows).slice(-MAX);
     const hi = (r) => (r.buttons & 2 || r.button === 2 || r.type === 'contextmenu' || r.type === 'auxclick' || r.buttons & 32 ? ' hl' : '');
-    this.list.innerHTML = rows.slice().reverse().map((r) =>
-      `<tr class="${hi(r)}"><td>${r.t}</td><td>${r.type}</td><td>${escapeHtml(r.pt)}</td><td>${r.id}</td><td>${r.button}</td><td>${r.buttons}</td><td>${r.pressure}</td><td>${r.size}</td><td>${r.x},${r.y}</td><td>${r.tilt}</td></tr>`).join('');
+    this.list.innerHTML = rows.slice().reverse().map((r) => r.type === 'note'
+      ? `<tr class="note"><td>${r.t}</td><td colspan="9">▶ ${escapeHtml(r.msg)}</td></tr>`
+      : `<tr class="${hi(r)}"><td>${r.t}</td><td>${r.type}</td><td>${escapeHtml(r.pt)}</td><td>${r.id}</td><td>${r.button}</td><td>${r.buttons}</td><td>${r.pressure}</td><td>${r.size}</td><td>${r.x},${r.y}</td><td>${r.tilt}</td></tr>`).join('');
     const keys = Object.keys(this.stats).filter((k) => /button[s]?[^|]*/.test(k)).sort();
     const interesting = keys.filter((k) => !k.includes('|b-1|bs0') && (k.includes('contextmenu') || k.includes('auxclick') || /bs([2-9]|[1-9]\d)/.test(k) || /\|b([1-9])/.test(k)));
     this.summary.innerHTML = interesting.length
@@ -81,7 +96,7 @@ export class InputDebugger {
   text() {
     const env = `UA: ${navigator.userAgent}\nmaxTouchPoints: ${navigator.maxTouchPoints}\ndpr: ${devicePixelRatio}\n`;
     const head = 't(ms)\ttype\tpointerType\tid\tbutton\tbuttons\tpressure\tsize\tx,y\ttilt\tprimary\ttouches\tcoalesced';
-    return env + head + '\n' + this.rows.map((r) => [r.t, r.type, r.pt, r.id, r.button, r.buttons, r.pressure, r.size, `${r.x},${r.y}`, r.tilt, r.primary, r.touches, r.coalesced].join('\t')).join('\n');
+    return env + head + '\n' + this.rows.map((r) => r.type === 'note' ? `${r.t}\t# ${r.msg}` : [r.t, r.type, r.pt, r.id, r.button, r.buttons, r.pressure, r.size, `${r.x},${r.y}`, r.tilt, r.primary, r.touches, r.coalesced].join('\t')).join('\n');
   }
 
   async copy() {

@@ -1,7 +1,7 @@
 const h = require('./harness');
 (async () => {
   const { browser, page, cdp, logs } = await h.launch();
-  await page.goto('http://localhost:8080/');
+  await page.goto(process.env.APP_URL || 'http://localhost:8080/');
   await page.waitForTimeout(500);
   await page.setInputFiles('#fileInput', h.S + '/sample.pdf');
   await page.waitForSelector('#editor:not([hidden])');

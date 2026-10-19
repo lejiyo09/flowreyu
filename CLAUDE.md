@@ -6,4 +6,6 @@
 - 입력은 js/input.js 의 PenInput / TouchInput / MouseInput 으로 분리되어 있다. 한 곳에 섞지 말 것.
 - 필기는 페이지 좌표(PDF 1배율)로 저장, 객체는 불변으로 다루고 document.js 의 setItems/begin/commit 으로만 수정 (Undo·자동 저장 일관성).
 - 렌더 중 애니메이션/큰 리페인트는 펜 지연을 만든다 (shimmer 제거 사례). 성능 확인: `npm run perf`.
+- 보조 버튼은 pointerType 과 무관하게 buttons&2 / button=2 / contextmenu 를 모두 받는다 (크롬이 펜→마우스 우클릭으로 바꿔 보내는 경우 포함). 펜 상태 꼬임 복구 로직(호버·window up·stale·touchend 0개)은 tests/spen.js 로 검증.
+- 펜은 다음 획에도 같은 pointerId 를 쓴다: 지연 정리 코드는 id 가 아니라 획 객체로 비교할 것.
 - S Pen 보조 버튼은 실제 기기 로그(설정 → 입력 디버그 로그)로 검증 전까지 미확정.

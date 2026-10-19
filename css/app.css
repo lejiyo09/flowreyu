@@ -289,6 +289,8 @@ input[type=range] { accent-color: var(--accent); }
 .debug-panel table { border-collapse: collapse; width: 100%; }
 .debug-panel th, .debug-panel td { padding: 2px 6px; text-align: left; white-space: nowrap; border-bottom: 1px solid #262626; }
 .debug-panel th { position: sticky; top: 0; background: #1b1d22; }
+.dbg-state { padding: 4px 8px; color: #8fd3ff; border-bottom: 1px solid #333; white-space: nowrap; overflow-x: auto; }
+.debug-panel tr.note td { color: #9fe39f; }
 .debug-panel tr.hl td { background: rgba(255, 196, 0, 0.18); color: #fff; }
 
 /* ── 기타 ── */

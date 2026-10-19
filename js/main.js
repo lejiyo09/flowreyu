@@ -73,6 +73,8 @@ const thumbs = new ThumbPanel($('#thumbs'), $('#thumbList'), viewer, (i) => { vi
 const dbg = new InputDebugger($('#debugPanel'));
 dbg.onClose = () => settings.set('debug', false);
 dbg.onToast = toast;
+dbg.getState = () => input.stateText();
+input.onTrace = (m) => dbg.note(m);
 
 // 텍스트 편집 중 다른 곳을 누르면 확정
 $('#viewport').addEventListener('pointerdown', (e) => {

@@ -1,7 +1,7 @@
 const h = require('./harness');
 (async () => {
   const { browser, page, cdp } = await h.launch({ viewport: { width: 1280, height: 800 }, dpr: 2 });
-  await page.goto('http://localhost:8080/');
+  await page.goto(process.env.APP_URL || 'http://localhost:8080/');
   await page.waitForTimeout(500);
   await page.setInputFiles('#fileInput', h.S + '/big.pdf');
   await page.waitForSelector('#editor:not([hidden])');
