@@ -7,6 +7,7 @@
 //  stroke : {id, t:'s', tool:'pen'|'hl', c, w, pr:bool(필압 사용), pts:[x,y,p, x,y,p, ...]}
 //  shape  : {id, t:'sh', kind:'line'|'arrow'|'rect'|'ellipse', c, w, x1,y1,x2,y2}
 //  text   : {id, t:'tx', x, y, c, fs, text}
+//  link   : {id, t:'ln', x, y, w, h, to:{page}|{url}}  (손가락 탭으로 이동하는 사용자 링크 영역)
 import { distToSegment, pointInPolygon, uid } from './util.js';
 
 const cache = new WeakMap(); // item -> {bbox, path, polys}
@@ -130,6 +131,7 @@ function computeBBox(item) {
     const L = textLayout(item);
     return { x: item.x, y: item.y, w: L.w, h: L.h };
   }
+  if (item.t === 'ln') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -189,6 +191,8 @@ export function drawItem(ctx, item) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke(itemPath(item));
+  } else if (item.t === 'ln') {
+    drawLink(ctx, item);
   } else if (item.t === 'tx') {
     const L = textLayout(item);
     ctx.fillStyle = item.c;
@@ -198,6 +202,31 @@ export function drawItem(ctx, item) {
       ctx.fillText(L.lines[i], item.x, item.y + i * item.fs * TEXT_LINE + item.fs * (TEXT_LINE - 1) / 2);
     }
   }
+}
+
+export function linkLabel(item) {
+  if (item.to?.url) { try { return '🔗 ' + new URL(item.to.url).hostname; } catch { return '🔗 ' + item.to.url; } }
+  if (Number.isInteger(item.to?.page)) return `→ ${item.to.page + 1}쪽`;
+  return '⚠ 대상 없음';
+}
+
+function drawLink(ctx, item) {
+  ctx.fillStyle = 'rgba(52,120,246,0.10)';
+  ctx.fillRect(item.x, item.y, item.w, item.h);
+  ctx.setLineDash([3, 2]);
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(52,120,246,0.85)';
+  ctx.strokeRect(item.x, item.y, item.w, item.h);
+  ctx.setLineDash([]);
+  const fs = Math.max(5, Math.min(9, item.h * 0.6));
+  ctx.font = `${fs}px ${TEXT_FONT}`;
+  ctx.textBaseline = 'top';
+  const label = linkLabel(item);
+  const tw = ctx.measureText(label).width + 4;
+  ctx.fillStyle = 'rgba(52,120,246,0.9)';
+  ctx.fillRect(item.x, item.y - fs - 3, Math.min(tw, Math.max(item.w, tw)), fs + 3);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillText(label, item.x + 2, item.y - fs - 1.5);
 }
 
 export const isHighlighter = (item) => item.t === 's' && item.tool === 'hl';
@@ -214,7 +243,7 @@ export function samplePoints(item) {
 export function hitTest(item, x, y, r) {
   const b = bbox(item);
   if (x < b.x - r || x > b.x + b.w + r || y < b.y - r || y > b.y + b.h + r) return false;
-  if (item.t === 'tx') return true;
+  if (item.t === 'tx' || item.t === 'ln') return true;
   if (item.t === 's') {
     const p = item.pts, half = (item.w / 2) * (item.pr ? 1.2 : 1);
     if (p.length === 3) return Math.hypot(p[0] - x, p[1] - y) <= r + half;
@@ -245,7 +274,7 @@ export function hitTestSweep(item, ax, ay, bx, by, r) {
 /** 올가미 다각형 안에 포함되는지 (대표 점 60% 이상) */
 export function insideLasso(item, poly) {
   const s = samplePoints(item);
-  if (item.t === 'tx') {
+  if (item.t === 'tx' || item.t === 'ln') {
     const b = bbox(item);
     return pointInPolygon(b.x + b.w / 2, b.y + b.h / 2, poly);
   }
@@ -336,6 +365,7 @@ export function transformItem(item, m) {
   }
   if (item.t === 'sh') return { ...item, x1: X(item.x1), y1: Y(item.y1), x2: X(item.x2), y2: Y(item.y2), w: item.w * s };
   if (item.t === 'tx') return { ...item, x: X(item.x), y: Y(item.y), fs: item.fs * s };
+  if (item.t === 'ln') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s };
   return item;
 }
 
@@ -361,6 +391,13 @@ export function sanitizeItem(raw) {
   if (raw.t === 'tx') {
     if (![raw.x, raw.y, raw.fs].every(fin) || typeof raw.text !== 'string') return null;
     return { id, t: 'tx', x: raw.x, y: raw.y, c, fs: raw.fs, text: raw.text };
+  }
+  if (raw.t === 'ln') {
+    if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0) return null;
+    const to = raw.to && typeof raw.to === 'object' ? raw.to : {};
+    const clean = typeof to.url === 'string' && /^(https?:|mailto:|tel:)/i.test(to.url) ? { url: to.url }
+      : Number.isInteger(to.page) && to.page >= 0 ? { page: to.page } : {};
+    return { id, t: 'ln', x: raw.x, y: raw.y, w: raw.w, h: raw.h, to: clean };
   }
   return null;
 }

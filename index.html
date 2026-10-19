@@ -35,6 +35,7 @@
     <symbol id="i-file" viewBox="0 0 24 24"><path d="M6.5 3.5h7l5 5v11a1.5 1.5 0 0 1-1.5 1.5h-10.5A1.5 1.5 0 0 1 5 19.5v-14.5a1.5 1.5 0 0 1 1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.5v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
     <symbol id="i-bug" viewBox="0 0 24 24"><rect x="7" y="7.5" width="10" height="12" rx="5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 7.5v12M3.5 13H7M17 13h3.5M5 8l2.5 2M19 8l-2.5 2M5 18.5l2.5-2M19 18.5l-2.5-2M9.5 5.5L8 3.5M14.5 5.5L16 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></symbol>
   </defs>
 </svg>
@@ -112,6 +113,7 @@
         <div id="zoomBadge" class="zoom-badge" hidden>100%</div>
       </div>
       <div id="viewerMsg" class="viewer-msg" hidden></div>
+      <button id="backChip" class="back-chip" data-ui hidden><svg><use href="#i-back"/></svg><span></span></button>
     </main>
   </div>
 
@@ -123,6 +125,7 @@
       <button data-tool="lasso" title="올가미 선택"><svg><use href="#i-lasso"/></svg></button>
       <button data-tool="text" title="텍스트"><svg><use href="#i-text"/></svg></button>
       <button data-tool="shape" title="도형"><svg><use href="#i-shape"/></svg></button>
+      <button data-tool="link" title="링크"><svg><use href="#i-link"/></svg></button>
     </div>
     <div class="sep"></div>
     <div class="quick-colors" id="quickColors"></div>
@@ -141,6 +144,7 @@
       <button data-tool="lasso" title="올가미"><svg><use href="#i-lasso"/></svg></button>
       <button data-tool="text" title="텍스트"><svg><use href="#i-text"/></svg></button>
       <button data-tool="shape" title="도형"><svg><use href="#i-shape"/></svg></button>
+      <button data-tool="link" title="링크"><svg><use href="#i-link"/></svg></button>
     </div>
     <div class="qm-colors"></div>
     <div class="qm-actions">
@@ -242,6 +246,21 @@
       <div class="row"><span>페이지 수</span><input type="number" id="nnPages" value="20" min="1" max="500"></div>
     </div>
     <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok" id="nnOk">만들기</button></footer>
+  </form>
+</dialog>
+
+<dialog id="linkDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner">
+    <header class="dlg-head"><h2>링크</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+      <div class="row"><span>연결 대상</span>
+        <div class="seg" id="lnKind"><button type="button" value="page">이 문서의 페이지</button><button type="button" value="url">웹 주소</button></div>
+      </div>
+      <div class="row" id="lnPageRow"><span>페이지 번호</span><input type="number" id="lnPage" min="1" inputmode="numeric"></div>
+      <div class="row" id="lnUrlRow"><span>주소</span><input type="text" id="lnUrl" placeholder="https://" inputmode="url" autocapitalize="off" spellcheck="false"></div>
+      <p class="muted small" style="margin:6px 0 0">손가락으로 링크 영역을 탭하면 이동합니다. PDF로 내보내도 링크가 유지됩니다.</p>
+    </div>
+    <footer class="dlg-foot"><button class="btn danger" value="delete" id="lnDelete">삭제</button><span style="flex:1"></span><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">저장</button></footer>
   </form>
 </dialog>
 

@@ -84,7 +84,7 @@ function sanitize(s) {
   if (!['system', 'light', 'dark'].includes(s.theme)) s.theme = 'system';
   if (!['menu', 'eraser', 'none'].includes(s.penButtonAction)) s.penButtonAction = 'menu';
   if (!['start', 'anytime'].includes(s.holdCondition)) s.holdCondition = 'start';
-  if (!['pen', 'hl', 'eraser', 'lasso', 'text', 'shape'].includes(s.tool)) s.tool = 'pen';
+  if (!['pen', 'hl', 'eraser', 'lasso', 'text', 'shape', 'link'].includes(s.tool)) s.tool = 'pen';
   return s;
 }
 

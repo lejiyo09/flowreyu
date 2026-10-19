@@ -65,6 +65,8 @@ const app = {
   showZoom: () => showZoomBadge(),
   onSelection: (sel, dragging, m) => renderSelection(sel, dragging, m),
   editText: (page, item, x, y) => startTextEdit(page, item, x, y),
+  editLink: (page, item, rect) => editLink(page, item, rect),
+  tap: (sx, sy) => followLinkAt(sx, sy),
   // 펜 두 번 탭 메뉴: 첫 탭이 남긴 편집을 기록 없이 되돌리기 위한 표식
   historyMark: () => (state.doc ? { len: state.doc.undoStack.length, top: state.doc.undoStack[state.doc.undoStack.length - 1] } : null),
   revertTo: (mark) => {
@@ -275,6 +277,8 @@ async function closeDoc() {
   }
   viewer.close();
   thumbs.clear();
+  $('#backChip').hidden = true;
+  backAnchor = null;
   if (state.pdf) { state.pdf.destroy().catch(() => {}); }
   state.doc = null; state.pdf = null; state.blob = null;
 }
@@ -536,6 +540,86 @@ function placeAddPageButton() {
 }
 viewer.on('sized', placeAddPageButton);
 
+// ───────────────────────────── 링크 ─────────────────────────────
+
+let backAnchor = null;
+async function followLinkAt(sx, sy) {
+  if (!state.doc) return;
+  const hit = viewer.pageAtScreen(sx, sy, true);
+  if (!hit) return;
+  const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
+  const items = state.doc.items(hit.page);
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].t === 'ln' && inside(items[i])) { followTarget(items[i].to); return; }
+  }
+  const links = await viewer.pdfLinks(hit.page);
+  const l = links.find(inside);
+  if (!l) return;
+  if (l.url) { followTarget({ url: l.url }); return; }
+  const d = await viewer.resolveDest(l.dest).catch(() => null);
+  if (d) followTarget(d); else toast('이 링크의 목적지를 찾을 수 없습니다');
+}
+
+function followTarget(to) {
+  if (to?.url) {
+    if (confirm(`외부 링크를 열까요?\n${to.url}`)) window.open(to.url, '_blank', 'noopener');
+    return;
+  }
+  if (!Number.isInteger(to?.page) || !viewer.pages[to.page]) { toast('링크 대상 페이지가 없습니다 (삭제되었을 수 있음)'); return; }
+  backAnchor = viewer.anchor();
+  viewer.goToPage(to.page, to.y || 0);
+  const chip = $('#backChip');
+  chip.querySelector('span').textContent = `돌아가기 (${backAnchor.page + 1}쪽)`;
+  chip.hidden = false;
+}
+$('#backChip').addEventListener('click', () => {
+  if (backAnchor) viewer.restoreAnchor(backAnchor);
+  backAnchor = null;
+  $('#backChip').hidden = true;
+});
+
+const lnDlg = $('#linkDlg');
+let lnEditing = null;
+function setLinkKind(kind) {
+  lnDlg.querySelectorAll('#lnKind button').forEach((b) => b.classList.toggle('on', b.value === kind));
+  $('#lnPageRow').hidden = kind !== 'page';
+  $('#lnUrlRow').hidden = kind !== 'url';
+  lnEditing.kind = kind;
+}
+lnDlg.querySelectorAll('#lnKind button').forEach((b) => b.addEventListener('click', () => setLinkKind(b.value)));
+function editLink(page, item, rect) {
+  lnEditing = { page, item, rect, kind: item?.to?.url ? 'url' : 'page' };
+  $('#lnPage').max = viewer.pages.length;
+  $('#lnPage').value = Number.isInteger(item?.to?.page) ? item.to.page + 1 : '';
+  $('#lnUrl').value = item?.to?.url || '';
+  $('#lnDelete').hidden = !item;
+  setLinkKind(lnEditing.kind);
+  lnDlg.showModal();
+}
+lnDlg.addEventListener('close', () => {
+  const ed = lnEditing, doc = state.doc;
+  lnEditing = null;
+  if (!ed || !doc) return;
+  const rv = lnDlg.returnValue;
+  const items = doc.items(ed.page);
+  if (rv === 'delete' && ed.item) { doc.setItems(ed.page, items.filter((i) => i.id !== ed.item.id)); return; }
+  if (rv !== 'ok') return;
+  let to;
+  if (ed.kind === 'url') {
+    let u = $('#lnUrl').value.trim();
+    if (!u) { toast('주소를 입력하세요'); return; }
+    if (!/^[a-z]+:/i.test(u)) u = 'https://' + u;
+    if (!/^(https?:|mailto:|tel:)/i.test(u)) { toast('http(s), mailto, tel 주소만 쓸 수 있습니다'); return; }
+    to = { url: u };
+  } else {
+    const n = parseInt($('#lnPage').value, 10);
+    if (!(n >= 1 && n <= viewer.pages.length)) { toast(`1~${viewer.pages.length} 사이의 페이지 번호를 입력하세요`); return; }
+    to = { page: n - 1 };
+  }
+  if (ed.item) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, to } : i)));
+  else doc.add(ed.page, { id: uid('ln'), t: 'ln', ...ed.rect, to });
+});
+
 // ───────────────────────────── Undo / Redo ─────────────────────────────
 
 function doUndo() {
@@ -575,14 +659,14 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'PageDown') viewer.goToPage(viewer.currentPage() + 1);
   else if (e.key === 'PageUp') viewer.goToPage(viewer.currentPage() - 1);
   else if (!mod && !e.altKey) {
-    const map = { p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', t: 'text', s: 'shape' };
+    const map = { p: 'pen', h: 'hl', e: 'eraser', l: 'lasso', t: 'text', s: 'shape', k: 'link' };
     if (map[e.key]) selectTool(map[e.key]);
   }
 });
 
 // ───────────────────────────── 도구 모음 ─────────────────────────────
 
-const TOOL_NAMES = { pen: '펜', hl: '형광펜', eraser: '지우개', lasso: '올가미', text: '텍스트', shape: '도형' };
+const TOOL_NAMES = { pen: '펜', hl: '형광펜', eraser: '지우개', lasso: '올가미', text: '텍스트', shape: '도형', link: '링크' };
 
 function toolCfgKey(tool) { return ['pen', 'hl', 'text', 'shape'].includes(tool) ? tool : null; }
 
@@ -737,6 +821,9 @@ function renderToolPopup(tool) {
       if (confirm(`${p + 1}쪽의 필기를 모두 지울까요? (실행 취소 가능)`)) { d.setItems(p, []); tools.validateSelection(); }
     });
     pop.appendChild(clr);
+  }
+  if (tool === 'link') {
+    pop.appendChild(h('<p class="muted small" style="margin:0">펜으로 사각형을 그려 링크 영역을 만들고 이동할 페이지나 웹 주소를 정하세요. 만든 링크를 펜으로 탭하면 수정, <b>손가락으로 탭하면 이동</b>합니다. PDF에 원래 있는 링크(목차 등)도 손가락 탭으로 열립니다.</p>'));
   }
   if (tool === 'lasso') {
     pop.appendChild(h('<p class="muted small" style="margin:0">펜으로 둘러싸서 선택 → 상자 안을 끌어 이동, 오른쪽 아래 점을 끌어 크기 조절. 탭하면 객체 하나 선택.</p>'));

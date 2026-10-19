@@ -187,6 +187,15 @@ export class NoteDocument extends Emitter {
       return out;
     };
     this.pages = remap(this.pages);
+    // 사용자 링크의 대상 페이지 번호도 옮긴다 (삭제된 페이지를 가리키면 대상 없음)
+    for (const [pg, items] of this.pages) {
+      if (!items.some((it) => it.t === 'ln' && Number.isInteger(it.to?.page))) continue;
+      this.pages.set(pg, items.map((it) => {
+        if (it.t !== 'ln' || !Number.isInteger(it.to?.page)) return it;
+        const n = map(it.to.page);
+        return { ...it, to: n >= 0 ? { page: n } : {} };
+      }));
+    }
     this.rev = remap(this.rev);
     this.dirty = new Set([...this.dirty].map(map).filter((n) => n >= 0));
     const fix = (stack) => stack

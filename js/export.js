@@ -1,6 +1,6 @@
 // 필기를 포함한 PDF 내보내기, 빈 노트 생성 (pdf-lib)
 import {
-  PDFDocument, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix,
+  PDFDocument, PDFName, PDFString, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix,
   moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
   setStrokingRgbColor, setGraphicsState, drawObject,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
@@ -53,6 +53,7 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     // 형광펜을 먼저 (화면과 같은 순서: 형광펜 레이어가 아래)
     const ordered = [...items.filter((it) => it.t === 's' && it.tool === 'hl'), ...items.filter((it) => !(it.t === 's' && it.tool === 'hl'))];
     for (const it of ordered) {
+      if (it.t === 'ln') { addLinkAnnot(pdf, pages, page, inv, it); continue; }
       if (it.t === 'tx') {
         const img = await textImage(pdf, it);
         if (!img) continue;
@@ -74,6 +75,18 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     if (i % 5 === 0) await new Promise((r) => setTimeout(r, 0));
   }
   return pdf.save({ useObjectStreams: true });
+}
+
+/** 사용자 링크 → PDF 링크 주석 (다른 PDF 뷰어에서도 눌러서 이동) */
+function addLinkAnnot(pdf, pages, page, inv, it) {
+  const pt = (x, y) => [inv[0] * x + inv[2] * y + inv[4], inv[1] * x + inv[3] * y + inv[5]];
+  const cs = [pt(it.x, it.y), pt(it.x + it.w, it.y), pt(it.x, it.y + it.h), pt(it.x + it.w, it.y + it.h)];
+  const xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
+  const dict = { Type: 'Annot', Subtype: 'Link', Rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], Border: [0, 0, 0] };
+  if (it.to?.url) dict.A = { Type: 'Action', S: 'URI', URI: PDFString.of(it.to.url) };
+  else if (Number.isInteger(it.to?.page) && pages[it.to.page]) dict.Dest = [pages[it.to.page].ref, PDFName.of('Fit')];
+  else return;
+  page.node.addAnnot(pdf.context.register(pdf.context.obj(dict)));
 }
 
 async function textImage(pdf, it) {

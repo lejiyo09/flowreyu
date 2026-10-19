@@ -21,6 +21,7 @@ export class ToolController {
       lasso: new LassoTool(this),
       text: new TextTool(this),
       shape: new ShapeTool(this),
+      link: new LinkTool(this),
     };
   }
 
@@ -531,6 +532,64 @@ class ShapeTool {
       this.ctl.doc.add(c.page, this.shape(c));
     }
     v.clearLive();
+  }
+
+  cancel() { this.ctl.flushLive(); this.ctl.viewer.clearLive(); }
+}
+
+// ───────────────────────────── 링크 ─────────────────────────────
+// 펜으로 사각형을 그려 링크 영역을 만들고, 대상(페이지/웹 주소)을 고른다. 기존 링크를 탭하면 편집.
+
+class LinkTool {
+  constructor(ctl) { this.ctl = ctl; }
+
+  begin(c, ev) {
+    const p = this.ctl.toPage(c.page, ev.sx, ev.sy);
+    c.x1 = c.x2 = p.x; c.y1 = c.y2 = p.y;
+    this.ctl.viewer.liveCanvas.style.mixBlendMode = 'normal';
+  }
+
+  move(c, pts) {
+    const last = pts[pts.length - 1];
+    if (!last) return;
+    const p = this.ctl.toPage(c.page, last.sx, last.sy);
+    c.x2 = p.x; c.y2 = p.y;
+    this.ctl.requestLive(() => this.draw(c));
+  }
+
+  rect(c) {
+    return { x: Math.min(c.x1, c.x2), y: Math.min(c.y1, c.y2), w: Math.abs(c.x2 - c.x1), h: Math.abs(c.y2 - c.y1) };
+  }
+
+  draw(c) {
+    const v = this.ctl.viewer, ctx = v.liveCtx;
+    v.clearLive();
+    v.pageTransform(ctx, v.pages[c.page]);
+    const r = this.rect(c);
+    ctx.fillStyle = 'rgba(52,120,246,0.12)';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.setLineDash([4 / v.cam.z, 3 / v.cam.z]);
+    ctx.lineWidth = 1.5 / v.cam.z;
+    ctx.strokeStyle = '#3478f6';
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+  }
+
+  end(c) {
+    this.ctl.flushLive();
+    const v = this.ctl.viewer;
+    v.clearLive();
+    const r = this.rect(c);
+    if (r.w * v.cam.z < 14 && r.h * v.cam.z < 14) {
+      // 탭: 그 자리의 링크 편집
+      const items = this.ctl.doc.items(c.page);
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i];
+        if (it.t === 'ln' && c.x1 >= it.x && c.x1 <= it.x + it.w && c.y1 >= it.y && c.y1 <= it.y + it.h) { this.ctl.app.editLink(c.page, it); return; }
+      }
+      this.ctl.app.toast?.('링크로 만들 영역을 펜으로 끌어서 지정하세요');
+      return;
+    }
+    this.ctl.app.editLink(c.page, null, r);
   }
 
   cancel() { this.ctl.flushLive(); this.ctl.viewer.clearLive(); }

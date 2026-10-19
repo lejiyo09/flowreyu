@@ -544,6 +544,8 @@ class TouchInput {
       if (g && !cancelled && !g.moved && !g.rejectedAny && now() - g.t0 < 350) {
         if (g.maxCount === 2 && settings.get('twoFingerUndo')) { this.r.viewer.setCamera(g.cam0.tx, g.cam0.ty, g.cam0.z); this.r.app.undo(); return; }
         if (g.maxCount === 3 && settings.get('threeFingerRedo')) { this.r.viewer.setCamera(g.cam0.tx, g.cam0.ty, g.cam0.z); this.r.app.redo(); return; }
+        // 한 손가락 탭: 링크 따라가기 (펜 필기와 겹치지 않도록 링크는 손가락으로만 연다)
+        if (g.maxCount === 1 && !t.rejected && now() - g.t0 < 300) { this.r.app.tap?.(t.x0, t.y0); return; }
       }
       if (g && !cancelled && g.maxCount === 1 && !t.rejected) this.startInertia();
       return;

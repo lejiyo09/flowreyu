@@ -282,11 +282,50 @@ export class Viewer extends Emitter {
     return best.index;
   }
 
-  goToPage(i) {
+  /** i 페이지로 이동. y 를 주면 페이지 안의 그 높이가 화면 위쪽에 오도록 */
+  goToPage(i, y = 0) {
     i = clamp(i, 0, this.pages.length - 1);
     const p = this.pages[i];
     if (!p) return;
-    this.setCamera(this.cam.tx, MARGIN - p.y * this.cam.z, this.cam.z);
+    this.setCamera(this.cam.tx, MARGIN - (p.y + clamp(y, 0, p.h)) * this.cam.z, this.cam.z);
+  }
+
+  // ───────────────────────── PDF 안의 링크 ─────────────────────────
+
+  /** 페이지의 링크 주석 → [{x,y,w,h, url?, dest?}] (페이지 좌표). 페이지별로 한 번만 읽는다 */
+  pdfLinks(i) {
+    const p = this.pages[i];
+    if (!p || !this.pdf) return Promise.resolve([]);
+    if (!p.linksP) {
+      const pdf = this.pdf;
+      p.linksP = (async () => {
+        const page = await pdf.getPage(i + 1);
+        const vt = page.getViewport({ scale: 1 }).transform;
+        const ann = await page.getAnnotations({ intent: 'display' });
+        const T = (x, y) => [vt[0] * x + vt[2] * y + vt[4], vt[1] * x + vt[3] * y + vt[5]];
+        return ann.filter((a) => a.subtype === 'Link' && Array.isArray(a.rect) && (a.url || a.unsafeUrl || a.dest)).map((a) => {
+          const [x1, y1] = T(a.rect[0], a.rect[1]), [x2, y2] = T(a.rect[2], a.rect[3]);
+          return { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), url: a.url || a.unsafeUrl || null, dest: a.dest || null };
+        });
+      })().catch((e) => { console.warn('links', e); return []; });
+    }
+    return p.linksP;
+  }
+
+  /** PDF 내부 목적지 → {page, y} */
+  async resolveDest(dest) {
+    const pdf = this.pdf;
+    const explicit = typeof dest === 'string' ? await pdf.getDestination(dest) : dest;
+    if (!Array.isArray(explicit)) return null;
+    const ref = explicit[0];
+    const page = typeof ref === 'object' && ref ? await pdf.getPageIndex(ref) : Number.isInteger(ref) ? ref : null;
+    if (page == null || !this.pages[page]) return null;
+    let y = 0;
+    if (explicit[1]?.name === 'XYZ' && typeof explicit[3] === 'number') {
+      const vt = (await pdf.getPage(page + 1)).getViewport({ scale: 1 }).transform;
+      y = Math.max(0, vt[1] * (explicit[2] || 0) + vt[3] * explicit[3] + vt[5] - 20);
+    }
+    return { page, y };
   }
 
   /** 현재 보기 위치를 페이지 기준 상대 값으로 (리사이즈·복원용) */
