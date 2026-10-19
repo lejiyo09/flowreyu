@@ -1,0 +1,362 @@
+// 필기 객체 모델, 렌더링, 히트 테스트, 변형
+//
+// 모든 좌표는 "페이지 좌표"(PDF 1배율 viewport 단위, 좌상단 원점, y 아래 방향)로 저장한다.
+// 확대율·스크롤과 무관하므로 저장된 필기는 어떤 배율에서도 같은 위치에 그려진다.
+//
+// 객체 종류
+//  stroke : {id, t:'s', tool:'pen'|'hl', c, w, pr:bool(필압 사용), pts:[x,y,p, x,y,p, ...]}
+//  shape  : {id, t:'sh', kind:'line'|'arrow'|'rect'|'ellipse', c, w, x1,y1,x2,y2}
+//  text   : {id, t:'tx', x, y, c, fs, text}
+import { distToSegment, pointInPolygon, uid } from './util.js';
+
+const cache = new WeakMap(); // item -> {bbox, path, polys}
+
+export const TEXT_FONT = '"Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
+export const TEXT_LINE = 1.3;
+
+/** 필압 → 반지름 배율 */
+export function pressureFactor(p) {
+  const q = p > 0 ? Math.min(p, 1) : 0.5;
+  return 0.3 + 1.15 * q; // p=0.6 ≒ 1.0
+}
+
+export function strokeRadii(item) {
+  const n = item.pts.length / 3;
+  const r = new Float32Array(n);
+  const base = item.w / 2;
+  if (item.pr) {
+    // 필압 튐 방지용 가벼운 평활화
+    let prev = item.pts[2];
+    for (let i = 0; i < n; i++) {
+      const p = item.pts[i * 3 + 2];
+      prev = prev + (p - prev) * 0.5;
+      r[i] = base * pressureFactor(prev);
+    }
+  } else r.fill(base);
+  return r;
+}
+
+/**
+ * 가변 두께 획을 "캡슐(원 + 사각형)" 합집합으로 Path2D에 추가한다.
+ * 모든 하위 경로의 감기 방향을 통일하므로 nonzero 채우기에서 구멍이 생기지 않는다.
+ * sink: {moveTo, lineTo, arc, closePath} 인터페이스 (Path2D 또는 내보내기용 기록기)
+ */
+export function addCapsules(sink, pts, radii, from = 0) {
+  const n = pts.length / 3;
+  if (n === 0) return;
+  const circle = (x, y, r) => { sink.moveTo(x + r, y); sink.arc(x, y, r, 0, Math.PI * 2); sink.closePath(); };
+  if (n === 1) { circle(pts[0], pts[1], radii[0]); return; }
+  const start = Math.max(0, from);
+  for (let i = start; i < n; i++) {
+    const x = pts[i * 3], y = pts[i * 3 + 1], r = radii[i];
+    // 꺾이는 곳·끝점에만 원을 넣는다 (직선 구간은 사각형끼리 겹쳐 충분함)
+    let needCircle = i === 0 || i === n - 1;
+    if (!needCircle && i > 0) {
+      const ax = x - pts[(i - 1) * 3], ay = y - pts[(i - 1) * 3 + 1];
+      const bx = pts[(i + 1) * 3] - x, by = pts[(i + 1) * 3 + 1] - y;
+      const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+      if (la > 0 && lb > 0) {
+        const cos = (ax * bx + ay * by) / (la * lb);
+        needCircle = cos < 0.99 || Math.abs(radii[i - 1] - r) > r * 0.15;
+      }
+    }
+    if (needCircle) circle(x, y, r);
+    if (i > 0) {
+      const px = pts[(i - 1) * 3], py = pts[(i - 1) * 3 + 1], pr = radii[i - 1];
+      const dx = x - px, dy = y - py, L = Math.hypot(dx, dy);
+      if (L < 1e-6) continue;
+      const nx = -dy / L, ny = dx / L;
+      const q = [px + nx * pr, py + ny * pr, x + nx * r, y + ny * r, x - nx * r, y - ny * r, px - nx * pr, py - ny * pr];
+      // 시계 방향(화면 기준 양의 면적)으로 맞춘다
+      let area = 0;
+      for (let k = 0; k < 4; k++) {
+        const k2 = (k + 1) % 4;
+        area += q[k * 2] * q[k2 * 2 + 1] - q[k2 * 2] * q[k * 2 + 1];
+      }
+      if (area < 0) {
+        sink.moveTo(q[6], q[7]); sink.lineTo(q[4], q[5]); sink.lineTo(q[2], q[3]); sink.lineTo(q[0], q[1]);
+      } else {
+        sink.moveTo(q[0], q[1]); sink.lineTo(q[2], q[3]); sink.lineTo(q[4], q[5]); sink.lineTo(q[6], q[7]);
+      }
+      sink.closePath();
+    }
+  }
+}
+
+/** 도형 → 폴리라인 목록 (페이지 좌표) */
+export function shapePolylines(s) {
+  const { x1, y1, x2, y2 } = s;
+  switch (s.kind) {
+    case 'line': return [[x1, y1, x2, y2]];
+    case 'arrow': {
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      const L = Math.hypot(x2 - x1, y2 - y1);
+      const h = Math.min(Math.max(s.w * 4, 8), L * 0.45);
+      const a1 = ang + Math.PI * 0.82, a2 = ang - Math.PI * 0.82;
+      return [[x1, y1, x2, y2], [x2 + Math.cos(a1) * h, y2 + Math.sin(a1) * h, x2, y2, x2 + Math.cos(a2) * h, y2 + Math.sin(a2) * h]];
+    }
+    case 'rect': return [[x1, y1, x2, y1, x2, y2, x1, y2, x1, y1]];
+    case 'ellipse': {
+      const cx = (x1 + x2) / 2, cy = (y1 + y2) / 2, rx = Math.abs(x2 - x1) / 2, ry = Math.abs(y2 - y1) / 2;
+      const seg = Math.max(24, Math.min(96, Math.round((rx + ry) / 3)));
+      const out = [];
+      for (let i = 0; i <= seg; i++) {
+        const a = (i / seg) * Math.PI * 2;
+        out.push(cx + Math.cos(a) * rx, cy + Math.sin(a) * ry);
+      }
+      return [out];
+    }
+  }
+  return [];
+}
+
+/** 텍스트 줄 분할과 크기 측정 (오프스크린 캔버스) */
+let measureCtx = null;
+export function textLayout(item) {
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  measureCtx.font = `${item.fs}px ${TEXT_FONT}`;
+  const lines = String(item.text).split('\n');
+  let w = 0;
+  for (const l of lines) w = Math.max(w, measureCtx.measureText(l).width);
+  return { lines, w: Math.max(w, item.fs * 0.5), h: lines.length * item.fs * TEXT_LINE };
+}
+
+function computeBBox(item) {
+  if (item.t === 's') {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const p = item.pts;
+    for (let i = 0; i < p.length; i += 3) {
+      if (p[i] < minX) minX = p[i]; if (p[i] > maxX) maxX = p[i];
+      if (p[i + 1] < minY) minY = p[i + 1]; if (p[i + 1] > maxY) maxY = p[i + 1];
+    }
+    const pad = (item.w / 2) * (item.pr ? 1.45 : 1) + 0.5;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+  }
+  if (item.t === 'sh') {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const pl of shapePolylines(item)) for (let i = 0; i < pl.length; i += 2) {
+      minX = Math.min(minX, pl[i]); maxX = Math.max(maxX, pl[i]);
+      minY = Math.min(minY, pl[i + 1]); maxY = Math.max(maxY, pl[i + 1]);
+    }
+    const pad = item.w / 2 + 0.5;
+    return { x: minX - pad, y: minY - pad, w: maxX - minX + pad * 2, h: maxY - minY + pad * 2 };
+  }
+  if (item.t === 'tx') {
+    const L = textLayout(item);
+    return { x: item.x, y: item.y, w: L.w, h: L.h };
+  }
+  return { x: 0, y: 0, w: 0, h: 0 };
+}
+
+function entry(item) {
+  let e = cache.get(item);
+  if (!e) { e = {}; cache.set(item, e); }
+  return e;
+}
+
+export function bbox(item) {
+  const e = entry(item);
+  return e.bbox || (e.bbox = computeBBox(item));
+}
+
+export function itemPath(item) {
+  const e = entry(item);
+  if (e.path) return e.path;
+  const path = new Path2D();
+  if (item.t === 's') addCapsules(path, item.pts, strokeRadii(item));
+  else if (item.t === 'sh') {
+    for (const pl of shapePolylines(item)) {
+      path.moveTo(pl[0], pl[1]);
+      for (let i = 2; i < pl.length; i += 2) path.lineTo(pl[i], pl[i + 1]);
+    }
+  }
+  e.path = path;
+  return path;
+}
+
+/** ctx는 이미 페이지 좌표계로 변환되어 있어야 한다 */
+export function drawItem(ctx, item) {
+  if (item.t === 's') {
+    ctx.fillStyle = item.c;
+    ctx.fill(itemPath(item));
+  } else if (item.t === 'sh') {
+    ctx.strokeStyle = item.c;
+    ctx.lineWidth = item.w;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke(itemPath(item));
+  } else if (item.t === 'tx') {
+    const L = textLayout(item);
+    ctx.fillStyle = item.c;
+    ctx.font = `${item.fs}px ${TEXT_FONT}`;
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < L.lines.length; i++) {
+      ctx.fillText(L.lines[i], item.x, item.y + i * item.fs * TEXT_LINE + item.fs * (TEXT_LINE - 1) / 2);
+    }
+  }
+}
+
+export const isHighlighter = (item) => item.t === 's' && item.tool === 'hl';
+
+/** 객체 위의 대표 점들 (올가미 판정용) */
+export function samplePoints(item) {
+  if (item.t === 's') return item.pts.filter((_, i) => i % 3 !== 2);
+  if (item.t === 'sh') return shapePolylines(item).flat();
+  const b = bbox(item);
+  return [b.x, b.y, b.x + b.w, b.y, b.x, b.y + b.h, b.x + b.w, b.y + b.h, b.x + b.w / 2, b.y + b.h / 2];
+}
+
+/** (x,y)에서 반경 r 안에 객체가 닿는지 */
+export function hitTest(item, x, y, r) {
+  const b = bbox(item);
+  if (x < b.x - r || x > b.x + b.w + r || y < b.y - r || y > b.y + b.h + r) return false;
+  if (item.t === 'tx') return true;
+  if (item.t === 's') {
+    const p = item.pts, half = (item.w / 2) * (item.pr ? 1.2 : 1);
+    if (p.length === 3) return Math.hypot(p[0] - x, p[1] - y) <= r + half;
+    for (let i = 3; i < p.length; i += 3) {
+      if (distToSegment(x, y, p[i - 3], p[i - 2], p[i], p[i + 1]) <= r + half) return true;
+    }
+    return false;
+  }
+  if (item.t === 'sh') {
+    for (const pl of shapePolylines(item)) for (let i = 2; i < pl.length; i += 2) {
+      if (distToSegment(x, y, pl[i - 2], pl[i - 1], pl[i], pl[i + 1]) <= r + item.w / 2) return true;
+    }
+  }
+  return false;
+}
+
+/** 선분 (ax,ay)-(bx,by) 이동 경로 전체에 대해 히트 테스트 (빠른 지우개 이동에도 누락 없이) */
+export function hitTestSweep(item, ax, ay, bx, by, r) {
+  const L = Math.hypot(bx - ax, by - ay);
+  const steps = Math.max(1, Math.ceil(L / Math.max(r * 0.5, 0.5)));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    if (hitTest(item, ax + (bx - ax) * t, ay + (by - ay) * t, r)) return true;
+  }
+  return false;
+}
+
+/** 올가미 다각형 안에 포함되는지 (대표 점 60% 이상) */
+export function insideLasso(item, poly) {
+  const s = samplePoints(item);
+  if (item.t === 'tx') {
+    const b = bbox(item);
+    return pointInPolygon(b.x + b.w / 2, b.y + b.h / 2, poly);
+  }
+  let inside = 0, total = 0;
+  const step = Math.max(1, Math.floor(s.length / 2 / 60)); // 최대 60점 정도 검사
+  for (let i = 0; i < s.length; i += 2 * step) {
+    total++;
+    if (pointInPolygon(s[i], s[i + 1], poly)) inside++;
+  }
+  return total > 0 && inside / total >= 0.6;
+}
+
+/** 부분 지우개: 원 (x,y,r)에 닿는 부분을 잘라 낸 새 획 목록을 돌려준다. 변화 없으면 null */
+export function eraseStrokePart(item, x, y, r) {
+  if (item.t !== 's') return hitTest(item, x, y, r) ? [] : null;
+  if (!hitTest(item, x, y, r)) return null;
+  const p = item.pts;
+  // 긴 선분을 잘게 쪼개서 원이 선분 사이를 지나쳐도 정확히 자르도록 한다
+  const maxSeg = Math.max(r * 0.4, 0.4);
+  const dense = [p[0], p[1], p[2]];
+  for (let i = 3; i < p.length; i += 3) {
+    const ax = p[i - 3], ay = p[i - 2], ap = p[i - 1], bx = p[i], by = p[i + 1], bp = p[i + 2];
+    const L = Math.hypot(bx - ax, by - ay);
+    const k = Math.ceil(L / maxSeg);
+    for (let j = 1; j <= k; j++) {
+      const t = j / k;
+      dense.push(ax + (bx - ax) * t, ay + (by - ay) * t, ap + (bp - ap) * t);
+    }
+  }
+  const half = item.w / 2;
+  const runs = [];
+  let cur = [];
+  for (let i = 0; i < dense.length; i += 3) {
+    const inside = Math.hypot(dense[i] - x, dense[i + 1] - y) <= r + half * 0.6;
+    if (inside) { if (cur.length) runs.push(cur); cur = []; }
+    else cur.push(dense[i], dense[i + 1], dense[i + 2]);
+  }
+  if (cur.length) runs.push(cur);
+  const out = [];
+  for (const run of runs) {
+    if (run.length < 6) continue; // 점 하나만 남은 조각은 버린다
+    out.push({ ...item, id: uid('s'), pts: simplifyPts(run, 0.15) });
+  }
+  return out;
+}
+
+/** 거의 일직선인 중간 점 제거 (Ramer–Douglas–Peucker, 필압 포함 3원소 배열) */
+export function simplifyPts(pts, eps) {
+  const n = pts.length / 3;
+  if (n <= 2) return pts.slice();
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop();
+    let maxD = 0, idx = -1;
+    for (let i = a + 1; i < b; i++) {
+      const d = distToSegment(pts[i * 3], pts[i * 3 + 1], pts[a * 3], pts[a * 3 + 1], pts[b * 3], pts[b * 3 + 1]);
+      const dp = Math.abs(pts[i * 3 + 2] - (pts[a * 3 + 2] + pts[b * 3 + 2]) / 2);
+      const score = d + dp * 2;
+      if (score > maxD) { maxD = score; idx = i; }
+    }
+    if (maxD > eps && idx > 0) { keep[idx] = 1; stack.push([a, idx], [idx, b]); }
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) if (keep[i]) out.push(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
+  return out;
+}
+
+const r2 = (v) => Math.round(v * 100) / 100;
+const r3 = (v) => Math.round(v * 1000) / 1000;
+
+export function roundPts(pts) {
+  const out = new Array(pts.length);
+  for (let i = 0; i < pts.length; i += 3) { out[i] = r2(pts[i]); out[i + 1] = r2(pts[i + 1]); out[i + 2] = r3(pts[i + 2]); }
+  return out;
+}
+
+/** 평행이동 + 균등 확대 (원점 ox,oy 기준 s배 후 dx,dy 이동) */
+export function transformItem(item, m) {
+  const { s, ox, oy, dx, dy } = m;
+  const X = (x) => ox + (x - ox) * s + dx;
+  const Y = (y) => oy + (y - oy) * s + dy;
+  if (item.t === 's') {
+    const pts = new Array(item.pts.length);
+    for (let i = 0; i < pts.length; i += 3) { pts[i] = r2(X(item.pts[i])); pts[i + 1] = r2(Y(item.pts[i + 1])); pts[i + 2] = item.pts[i + 2]; }
+    return { ...item, pts, w: item.w * s };
+  }
+  if (item.t === 'sh') return { ...item, x1: X(item.x1), y1: Y(item.y1), x2: X(item.x2), y2: Y(item.y2), w: item.w * s };
+  if (item.t === 'tx') return { ...item, x: X(item.x), y: Y(item.y), fs: item.fs * s };
+  return item;
+}
+
+const COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
+const fin = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/** 저장소에서 읽은 객체 검증. 잘못된 객체는 null */
+export function sanitizeItem(raw) {
+  if (!raw || typeof raw !== 'object' || typeof raw.t !== 'string') return null;
+  const id = typeof raw.id === 'string' ? raw.id : uid('x');
+  const c = typeof raw.c === 'string' && COLOR_RE.test(raw.c) ? raw.c : '#111111';
+  if (raw.t === 's') {
+    if (!Array.isArray(raw.pts) || raw.pts.length < 3 || raw.pts.length % 3 !== 0) return null;
+    if (!raw.pts.every(fin)) return null;
+    if (!fin(raw.w) || raw.w <= 0) return null;
+    return { id, t: 's', tool: raw.tool === 'hl' ? 'hl' : 'pen', c, w: raw.w, pr: !!raw.pr, pts: raw.pts };
+  }
+  if (raw.t === 'sh') {
+    if (!['line', 'arrow', 'rect', 'ellipse'].includes(raw.kind)) return null;
+    if (![raw.x1, raw.y1, raw.x2, raw.y2, raw.w].every(fin)) return null;
+    return { id, t: 'sh', kind: raw.kind, c, w: raw.w, x1: raw.x1, y1: raw.y1, x2: raw.x2, y2: raw.y2 };
+  }
+  if (raw.t === 'tx') {
+    if (![raw.x, raw.y, raw.fs].every(fin) || typeof raw.text !== 'string') return null;
+    return { id, t: 'tx', x: raw.x, y: raw.y, c, fs: raw.fs, text: raw.text };
+  }
+  return null;
+}

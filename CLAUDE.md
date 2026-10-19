@@ -1,0 +1,9 @@
+# FlexNote 작업 지침
+
+- 태블릿(S Pen) PDF 필기 웹앱. 빌드 없음: HTML/CSS/ES 모듈 그대로 배포 (GitHub Pages: main 브랜치 루트).
+- 실행: `node server.js` → http://localhost:8080 (file:// 불가)
+- 회귀 테스트: `cd tests && npm i && npm run fixtures && npm test` (Playwright, 펜/터치는 CDP로 주입). 수정 후 반드시 실행.
+- 입력은 js/input.js 의 PenInput / TouchInput / MouseInput 으로 분리되어 있다. 한 곳에 섞지 말 것.
+- 필기는 페이지 좌표(PDF 1배율)로 저장, 객체는 불변으로 다루고 document.js 의 setItems/begin/commit 으로만 수정 (Undo·자동 저장 일관성).
+- 렌더 중 애니메이션/큰 리페인트는 펜 지연을 만든다 (shimmer 제거 사례). 성능 확인: `npm run perf`.
+- S Pen 보조 버튼은 실제 기기 로그(설정 → 입력 디버그 로그)로 검증 전까지 미확정.
