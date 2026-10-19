@@ -4,7 +4,7 @@ import {
   moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
   setStrokingRgbColor, setGraphicsState, drawObject,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
-import { strokeRuns, shapePolylines, textLayout, drawItem, bbox } from './ink.js';
+import { strokeRuns, shapePolylines, textLayout, drawItem, bbox, foldHidden } from './ink.js';
 
 function hexToRgb(hex) {
   let h = hex.replace('#', '');
@@ -51,7 +51,9 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     const gsNormal = gs(page, 'n', { Type: 'ExtGState', ca: 1, CA: 1, BM: 'Normal' });
     const gsMul = gs(page, 'm', { Type: 'ExtGState', ca: 1, CA: 1, BM: 'Multiply' });
     // 형광펜을 먼저 (화면과 같은 순서: 형광펜 레이어가 아래)
-    const ordered = [...items.filter((it) => it.t === 's' && it.tool === 'hl'), ...items.filter((it) => !(it.t === 's' && it.tool === 'hl'))];
+    const folded = foldHidden(items); // 접힌 포스트잇 위 필기는 화면처럼 숨김
+    const shown = folded ? items.filter((it) => !folded.has(it.id)) : items;
+    const ordered = [...shown.filter((it) => it.t === 's' && it.tool === 'hl'), ...shown.filter((it) => !(it.t === 's' && it.tool === 'hl'))];
     for (const it of ordered) {
       if (it.t === 'ln') { addLinkAnnot(pdf, pages, page, inv, it); continue; }
       if (it.t === 'tx' || it.t === 'nt' || it.t === 'im') {

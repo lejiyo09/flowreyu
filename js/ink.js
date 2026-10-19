@@ -9,7 +9,7 @@
 //  text   : {id, t:'tx', x, y, c, fs, text}
 //  link   : {id, t:'ln', x, y, w, h, to:{page}|{url}}  (손가락 탭으로 이동하는 사용자 링크 영역)
 //  image  : {id, t:'im', x, y, w, h, blob}            (blob = IndexedDB blobs 스토어의 id, 이미지 자체는 따로 저장)
-//  note   : {id, t:'nt', x, y, w, h, c(배경), fs, text} (포스트잇)
+//  note   : {id, t:'nt', x, y, w, h, c(배경), fs, text, fold?} (포스트잇, fold=true 면 작은 아이콘으로 접힘)
 
 /** 지우개가 건드리지 않는 "개체" 종류 (설정의 "개체도 지우기"로 허용) */
 export const OBJECT_TYPES = new Set(['tx', 'ln', 'im', 'nt']);
@@ -137,6 +137,7 @@ function computeBBox(item) {
     const L = textLayout(item);
     return { x: item.x, y: item.y, w: L.w, h: L.h };
   }
+  if (item.t === 'nt' && item.fold) return noteIconRect(item);
   if (item.t === 'ln' || item.t === 'im' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
@@ -250,6 +251,44 @@ function drawImage(ctx, item) {
 
 // ── 포스트잇 ──
 export const NOTE_PAD = 8;
+const NOTE_ICON = 30; // 접힌 포스트잇 아이콘 크기 (페이지 단위)
+
+/** 접힌 포스트잇 아이콘 영역 (원래 위치의 왼쪽 위) */
+export function noteIconRect(n) {
+  return { x: n.x, y: n.y, w: Math.min(NOTE_ICON, n.w), h: Math.min(NOTE_ICON, n.h) };
+}
+
+/** 펼친 포스트잇의 접기(–) 버튼 영역 (오른쪽 위) */
+export function noteFoldButton(n) {
+  const s = Math.min(18, n.w * 0.3, n.h * 0.3);
+  return { x: n.x + n.w - s, y: n.y, w: s, h: s };
+}
+
+const inRect = (b, r) => b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.w <= r.x + r.w + 0.5 && b.y + b.h <= r.y + r.h + 0.5;
+
+/** 포스트잇 위에 쓴 것: 포스트잇보다 나중에(위에) 그려졌고 포스트잇 안에 완전히 들어가는 필기·도형·글상자 */
+export function noteAttached(items, note) {
+  const out = [];
+  const i0 = items.indexOf(note);
+  if (i0 < 0) return out;
+  const rect = { x: note.x, y: note.y, w: note.w, h: note.h };
+  for (let j = i0 + 1; j < items.length; j++) {
+    const it = items[j];
+    if ((it.t === 's' || it.t === 'sh' || it.t === 'tx') && inRect(bbox(it), rect)) out.push(it.id);
+  }
+  return out;
+}
+
+/** 접힌 포스트잇과 함께 숨길 객체 id (위에 쓴 필기) */
+export function foldHidden(items) {
+  let hidden = null;
+  for (const it of items) {
+    if (it.t !== 'nt' || !it.fold) continue;
+    if (!hidden) hidden = new Set();
+    for (const id of noteAttached(items, it)) hidden.add(id);
+  }
+  return hidden;
+}
 
 /** 포스트잇 안의 글 줄바꿈 (폭에 맞춰 자동 줄바꿈 + 직접 줄바꿈) */
 export function noteLines(item) {
@@ -276,6 +315,28 @@ export function noteLines(item) {
 }
 
 function drawNote(ctx, item) {
+  if (item.fold) {
+    // 접힌 상태: 작은 포스트잇 아이콘 (모서리 접힘 + 줄)
+    const r = noteIconRect(item), f = r.w * 0.3;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.25)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 1.5;
+    ctx.fillStyle = item.c;
+    ctx.beginPath();
+    ctx.moveTo(r.x, r.y); ctx.lineTo(r.x + r.w, r.y); ctx.lineTo(r.x + r.w, r.y + r.h - f); ctx.lineTo(r.x + r.w - f, r.y + r.h); ctx.lineTo(r.x, r.y + r.h); ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = 'rgba(0,0,0,0.12)';
+    ctx.beginPath(); ctx.moveTo(r.x + r.w, r.y + r.h - f); ctx.lineTo(r.x + r.w - f, r.y + r.h - f); ctx.lineTo(r.x + r.w - f, r.y + r.h); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+    ctx.lineWidth = Math.max(0.8, r.w * 0.05);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) { const y = r.y + r.h * (0.3 + k * 0.18); ctx.moveTo(r.x + r.w * 0.2, y); ctx.lineTo(r.x + r.w * (k === 2 ? 0.5 : 0.75), y); }
+    ctx.stroke();
+    return;
+  }
   ctx.save();
   ctx.shadowColor = 'rgba(0,0,0,0.22)';
   ctx.shadowBlur = 6;
@@ -283,9 +344,16 @@ function drawNote(ctx, item) {
   ctx.fillStyle = item.c;
   ctx.fillRect(item.x, item.y, item.w, item.h);
   ctx.restore();
-  // 윗부분 접착면 느낌
+  // 윗부분 접착면 느낌 + 접기(–) 버튼
   ctx.fillStyle = 'rgba(0,0,0,0.05)';
   ctx.fillRect(item.x, item.y, item.w, Math.min(10, item.h * 0.12));
+  const fb = noteFoldButton(item);
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = Math.max(0.8, fb.w * 0.09);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(fb.x + fb.w * 0.3, fb.y + fb.h * 0.5); ctx.lineTo(fb.x + fb.w * 0.7, fb.y + fb.h * 0.5);
+  ctx.stroke();
   if (!item.text) return;
   ctx.save();
   ctx.beginPath();
@@ -494,7 +562,7 @@ export function sanitizeItem(raw) {
   }
   if (raw.t === 'nt') {
     if (![raw.x, raw.y, raw.w, raw.h, raw.fs].every(fin) || raw.w <= 0 || raw.h <= 0) return null;
-    return { id, t: 'nt', x: raw.x, y: raw.y, w: raw.w, h: raw.h, c, fs: raw.fs, text: typeof raw.text === 'string' ? raw.text : '' };
+    return { id, t: 'nt', x: raw.x, y: raw.y, w: raw.w, h: raw.h, c, fs: raw.fs, text: typeof raw.text === 'string' ? raw.text : '', ...(raw.fold ? { fold: true } : {}) };
   }
   if (raw.t === 'ln') {
     if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0) return null;

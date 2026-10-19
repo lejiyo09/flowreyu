@@ -3,7 +3,7 @@
 import { settings } from './settings.js';
 import {
   widthBucket, pressureFactor, roundPts, simplifyPts, hitTestSweep, eraseStrokePart,
-  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES,
+  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES, foldHidden, noteAttached,
 } from './ink.js';
 import { uid, dist, now } from './util.js';
 
@@ -77,6 +77,11 @@ export class ToolController {
     this.snap = null;
     this.app.guides?.penUp();
     if (!c) return;
+    // 짧은 탭이 접힌 포스트잇이나 펼친 포스트잇의 접기 버튼 위면: 그리지 않고 접기/펼치기
+    if (c.path < 6 && now() - c.t0 < 350) {
+      const p = this.toPage(c.page, c.sx0, c.sy0);
+      if (this.app.foldAt?.(c.page, p.x, p.y)) { c.tool.cancel(c); this.viewer.clearLive(); return; }
+    }
     c.tool.end(c);
     // 지우개를 도구로 골라 한 번 쓴 경우 (펜 지우개 끝/버튼으로 잠깐 쓴 지우개는 제외)
     if (c.name === 'eraser' && !c.override) this.app.onEraserUsed?.();
@@ -115,6 +120,11 @@ export class ToolController {
 
   // ── 선택(올가미) ──
   setSelection(sel) {
+    // 포스트잇을 고르면 그 위에 쓴 필기도 함께 (같이 옮겨지고 지워짐)
+    if (sel && sel.ids.size && this.doc) {
+      const items = this.doc.items(sel.page);
+      for (const it of items) if (it.t === 'nt' && sel.ids.has(it.id)) for (const id of noteAttached(items, it)) sel.ids.add(id);
+    }
     this.selection = sel && sel.ids.size ? sel : null;
     this.viewer.selection = this.selection ? { page: this.selection.page, ids: this.selection.ids, m: null } : null;
     this.app.onSelection(this.selection);
@@ -153,10 +163,12 @@ export class ToolController {
     this.setSelection({ page: sel.page, ids: new Set(copies.map((c) => c.id)) });
   }
 
-  recolorSelection(color) {
+  /** 선택 색 바꾸기. target 'note' 면 포스트잇 배경만, 'ink' 면 필기·도형·글상자만 (포스트잇은 그대로) */
+  recolorSelection(color, target = 'ink') {
     const sel = this.selection;
     if (!sel) return;
-    this.doc.setItems(sel.page, this.doc.items(sel.page).map((it) => (sel.ids.has(it.id) && !(it.t === 's' && it.tool === 'hl') ? { ...it, c: color } : it)));
+    const want = (it) => (target === 'note' ? it.t === 'nt' : it.t !== 'nt' && !(it.t === 's' && it.tool === 'hl') && 'c' in it);
+    this.doc.setItems(sel.page, this.doc.items(sel.page).map((it) => (sel.ids.has(it.id) && want(it) ? { ...it, c: color } : it)));
     this.app.onSelection(this.selection);
   }
 
@@ -309,11 +321,12 @@ class EraserTool {
     for (const page of pages) {
       const A = this.ctl.toPage(page, ax, ay), B = this.ctl.toPage(page, bx, by);
       const items = doc.items(page);
+      const folded = foldHidden(items); // 접혀서 안 보이는 필기는 지우지 않음
       let out = null;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         // 텍스트·링크·그림·포스트잇은 지우개로 지우지 않는다 (올가미로 삭제). 설정으로 허용 가능
-        if (OBJECT_TYPES.has(it.t) && !c.eraseText) { if (out) out.push(it); continue; }
+        if ((OBJECT_TYPES.has(it.t) && !c.eraseText) || (folded && folded.has(it.id))) { if (out) out.push(it); continue; }
         if (c.mode === 'area' && it.t === 's') {
           // 이동 구간을 잘게 나눠 부분 지우기
           let parts = [it];
@@ -465,7 +478,9 @@ class LassoTool {
         return;
       }
       const ids = new Set();
-      for (const it of this.ctl.doc.items(c.page)) if (insideLasso(it, c.poly)) ids.add(it.id);
+      const all = this.ctl.doc.items(c.page);
+      const folded = foldHidden(all);
+      for (const it of all) if (!(folded && folded.has(it.id)) && insideLasso(it, c.poly)) ids.add(it.id);
       this.ctl.setSelection({ page: c.page, ids });
       if (!ids.size) this.ctl.app.toast?.('선택된 필기가 없습니다');
       return;

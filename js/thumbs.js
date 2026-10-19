@@ -1,5 +1,5 @@
 // 페이지 썸네일 패널: 보이는 썸네일만 지연 렌더링, 필기도 함께 표시
-import { drawItem, isHighlighter } from './ink.js';
+import { drawItem, isHighlighter, foldHidden } from './ink.js';
 import { debounce } from './util.js';
 
 const THUMB_W = 130;
@@ -126,9 +126,11 @@ export class ThumbPanel {
     const s = c.width / this.viewer.pages[i].w;
     ctx.setTransform(s, 0, 0, s, 0, 0);
     ctx.globalCompositeOperation = 'multiply';
-    for (const item of items) if (isHighlighter(item)) drawItem(ctx, item);
+    const folded = foldHidden(items);
+    const vis = folded ? items.filter((it) => !folded.has(it.id)) : items;
+    for (const item of vis) if (isHighlighter(item)) drawItem(ctx, item);
     ctx.globalCompositeOperation = 'source-over';
-    for (const item of items) if (!isHighlighter(item)) drawItem(ctx, item);
+    for (const item of vis) if (!isHighlighter(item)) drawItem(ctx, item);
   }
 
   clear() { this.io.disconnect(); this.list.innerHTML = ''; this.items = []; this.pdfCache.clear(); this.queue.clear(); this.cur = -1; }

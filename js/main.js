@@ -9,7 +9,7 @@ import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -70,6 +70,7 @@ const app = {
     selectTool(toolBeforeEraser || 'pen');
   },
   tap: (sx, sy) => followLinkAt(sx, sy),
+  foldAt: (page, x, y) => foldAt(page, x, y),
   // 펜 두 번 탭 메뉴: 첫 탭이 남긴 편집을 기록 없이 되돌리기 위한 표식
   historyMark: () => (state.doc ? { len: state.doc.undoStack.length, top: state.doc.undoStack[state.doc.undoStack.length - 1] } : null),
   revertTo: (mark) => {
@@ -609,6 +610,27 @@ function selectAfterInsert(page, id) {
   tools.setSelection({ page, ids: new Set([id]) });
 }
 
+// 포스트잇 접기/펼치기 (실행 취소 가능). 접으면 작은 아이콘이 되고 위에 쓴 필기도 함께 숨는다
+function setNotesFold(page, ids, fold) {
+  const d = state.doc;
+  if (!d) return;
+  d.setItems(page, d.items(page).map((i) => (i.t === 'nt' && ids.has(i.id) ? (fold ? { ...i, fold: true } : (({ fold: _f, ...rest }) => rest)(i)) : i)));
+}
+
+const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+
+/** (x,y)가 접힌 포스트잇 아이콘이거나 펼친 포스트잇의 접기 버튼이면 토글하고 true */
+function foldAt(page, x, y) {
+  const items = state.doc?.items(page) || [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const n = items[i];
+    if (n.t !== 'nt') continue;
+    if (n.fold && inside(noteIconRect(n), x, y)) { setNotesFold(page, new Set([n.id]), false); return true; }
+    if (!n.fold && inside(noteFoldButton(n), x, y)) { setNotesFold(page, new Set([n.id]), true); return true; }
+  }
+  return false;
+}
+
 function insertNote(at) {
   const doc = state.doc;
   if (!doc) return;
@@ -647,6 +669,7 @@ async function followLinkAt(sx, sy) {
   if (!state.doc) return;
   const hit = viewer.pageAtScreen(sx, sy, true);
   if (!hit) return;
+  if (foldAt(hit.page, hit.x, hit.y)) return; // 손가락 탭으로도 포스트잇 접기/펼치기
   const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
   const items = state.doc.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
@@ -1071,15 +1094,23 @@ function positionOverlays() {
       menu.hidden = !!dragging;
       if (!dragging) {
         const colors = menu.querySelector('.sel-colors');
-        const selItems = state.doc.items(sel.page).filter((i) => sel.ids.has(i.id));
-        const kind = selItems.length && selItems.every((i) => i.t === 'nt') ? 'note' : 'ink';
+        const pageItems = state.doc.items(sel.page);
+        const selItems = pageItems.filter((i) => sel.ids.has(i.id));
+        // 포스트잇(+그 위에 쓴 필기)만 골랐으면 포스트잇 색, 그 밖은 펜 색
+        const selNotes = selItems.filter((i) => i.t === 'nt');
+        const onNotes = new Set(selNotes.flatMap((n) => noteAttached(pageItems, n)));
+        const kind = selNotes.length && selItems.every((i) => i.t === 'nt' || onNotes.has(i.id)) ? 'note' : 'ink';
         if (colors.dataset.kind !== kind) {
           colors.dataset.kind = kind;
           colors.innerHTML = '';
-          for (const c of kind === 'note' ? NOTE_COLORS.slice(0, 5) : PEN_COLORS.slice(0, 5)) colors.appendChild(swatch(c, false, () => tools.recolorSelection(c)));
+          for (const c of kind === 'note' ? NOTE_COLORS.slice(0, 5) : PEN_COLORS.slice(0, 5)) colors.appendChild(swatch(c, false, () => tools.recolorSelection(c, kind)));
         }
         // 글상자/포스트잇 하나만 선택했으면 "편집" 버튼
-        menu.querySelector('[data-sel=edit]').hidden = !(selItems.length === 1 && (selItems[0].t === 'tx' || selItems[0].t === 'nt'));
+        menu.querySelector('[data-sel=edit]').hidden = !(selItems.filter((i) => i.t === 'tx' || i.t === 'nt').length === 1 && !selItems.some((i) => i.t === 'nt' && i.fold));
+        const notes = selItems.filter((i) => i.t === 'nt');
+        const fb = menu.querySelector('[data-sel=fold]');
+        fb.hidden = !notes.length;
+        fb.title = notes.some((n) => !n.fold) ? '포스트잇 접기' : '포스트잇 펼치기';
         const mw = menu.offsetWidth, mh = menu.offsetHeight;
         let top = a.y - mh - 10;
         if (top < 6) top = a.y + hh * z + 10;
@@ -1095,9 +1126,17 @@ $('#selMenu').addEventListener('click', (e) => {
   if (a === 'delete') tools.deleteSelection();
   if (a === 'dup') tools.duplicateSelection();
   if (a === 'clear') tools.clearSelection();
+  if (a === 'fold') {
+    const sel = tools.selection;
+    if (!sel) return;
+    const notes = state.doc.items(sel.page).filter((i) => i.t === 'nt' && sel.ids.has(i.id));
+    const fold = notes.some((n) => !n.fold);
+    tools.clearSelection();
+    setNotesFold(sel.page, new Set(notes.map((n) => n.id)), fold);
+  }
   if (a === 'edit') {
     const sel = tools.selection;
-    const it = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id));
+    const it = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id) && (i.t === 'tx' || i.t === 'nt'));
     if (it) { tools.clearSelection(); startTextEdit(sel.page, it); }
   }
 });

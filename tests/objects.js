@@ -100,7 +100,9 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   if (!(await page.locator('#selMenu [data-sel=edit]').isVisible())) console.log('DEBUG', JSON.stringify(await page.evaluate(() => ({ sel: __flexnote.tools.selection && [...__flexnote.tools.selection.ids], tool: __flexnote.settings.get('tool'), menuHidden: document.querySelector('#selMenu').hidden, editHidden: document.querySelector('[data-sel=edit]').hidden, items: __flexnote.state.doc.items(0).map((i) => i.t + ':' + i.id), editing: !document.querySelector('#textEditor').hidden }))));
   check('selection menu shows "edit" for single note', await page.locator('#selMenu [data-sel=edit]').isVisible());
   await page.locator('#selMenu .sel-colors .swatch').nth(2).click();
+  const inkColor0 = (await items('s')).at(-1).c;
   check('note recolored with note palette', (await items('nt'))[0].c === '#f8bbd0', (await items('nt'))[0].c);
+  check('ink written on the note keeps its pen color', (await items('s')).at(-1).c === inkColor0);
   // 지우개로 안 지워짐 (노트 위 필기는 지워짐)
   await page.keyboard.press('Escape');
   await page.click('#toolbar [data-tool=eraser]');
