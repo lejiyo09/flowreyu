@@ -1,6 +1,7 @@
 # FlexNote 작업 지침
 
 - 태블릿(S Pen) PDF 필기 웹앱. 빌드 없음: HTML/CSS/ES 모듈 그대로 배포 (GitHub Pages: main 브랜치 루트).
+- **파일을 추가·수정하면 `node tools/gen-sw.js` 실행** (오프라인 사전 캐시 목록·버전 갱신. 안 하면 사용자 기기가 옛 코드를 계속 씀). `npm test` 가 `--check` 로 검사한다.
 - 실행: `node server.js` → http://localhost:8080 (file:// 불가)
 - 회귀 테스트: `cd tests && npm i && npm run fixtures && npm test` (Playwright, 펜/터치는 CDP로 주입). 수정 후 반드시 실행.
 - 입력은 js/input.js 의 PenInput / TouchInput / MouseInput 으로 분리되어 있다. 한 곳에 섞지 말 것.

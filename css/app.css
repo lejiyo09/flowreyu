@@ -312,3 +312,8 @@ input[type=range] { accent-color: var(--accent); }
   box-shadow: var(--shadow); text-align: center;
 }
 .toast.error { background: #c62f34; }
+.update-bar {
+  position: fixed; top: calc(60px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 96;
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 12px;
+  background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 14px; white-space: nowrap;
+}

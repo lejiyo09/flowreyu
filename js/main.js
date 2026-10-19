@@ -984,14 +984,47 @@ async function boot() {
   if (last && (await store.getDoc(last).catch(() => null))) await openDoc(last);
   else { showScreen('library'); renderLibrary(); }
 
-  if ('serviceWorker' in navigator && window.isSecureContext && location.protocol !== 'file:') {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW 등록 실패', e));
-  }
+}
+
+// ───────────────────────────── 오프라인 (서비스 워커) ─────────────────────────────
+// 첫 접속 때 앱 파일 전체를 캐시해 두면 이후에는 와이파이 없이도 켜진다.
+// 새 버전이 받아지면 바로 바꾸지 않고 "업데이트" 버튼을 보여 준다 (작업 중 코드가 섞이지 않도록).
+function setupServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  if (new URLSearchParams(location.search).has('nosw')) return;
+  let userAskedUpdate = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (userAskedUpdate) location.reload();
+  });
+  const offerUpdate = (worker) => {
+    const bar = $('#updateBar');
+    bar.hidden = false;
+    bar.querySelector('button').onclick = async () => {
+      bar.hidden = true;
+      await state.doc?.flush();
+      userAskedUpdate = true;
+      worker.postMessage('SKIP_WAITING');
+    };
+  };
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w?.addEventListener('statechange', () => {
+        if (w.state !== 'installed') return;
+        if (navigator.serviceWorker.controller) offerUpdate(w);
+        else toast('오프라인에서도 쓸 수 있도록 준비했습니다 (와이파이 없이 실행 가능)', { ms: 4000 });
+      });
+    });
+    // 앱으로 돌아올 때마다 새 버전 확인 (온라인일 때만 의미 있음)
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && navigator.onLine) reg.update().catch(() => {}); });
+  }).catch((e) => console.warn('서비스 워커 등록 실패', e));
 }
 
 if (location.protocol === 'file:') {
   document.body.innerHTML = '<div style="padding:32px;font:16px system-ui;line-height:1.6"><h2>로컬 서버로 실행해 주세요</h2><p>file:// 로 직접 열면 브라우저 보안 정책 때문에 모듈과 PDF.js 워커를 불러올 수 없습니다.</p><p>폴더에서 <code>node server.js</code> 또는 <code>python3 -m http.server 8080</code> 실행 후 <code>http://localhost:8080</code> 으로 접속하세요.</p></div>';
 } else {
+  setupServiceWorker();
   boot();
 }
 

@@ -3,8 +3,11 @@
   "private": true,
   "scripts": {
     "fixtures": "mkdir -p fixtures && node mkpdf.js fixtures/sample.pdf && node mkbig.js fixtures/big.pdf",
-    "test": "node func.js && node spen.js && node pages.js && node fail.js && node extra.js",
+    "test": "node ../tools/gen-sw.js --check && node func.js && node spen.js && node pages.js && node offline.js && node swupdate.js && node fail.js && node extra.js",
     "perf": "node big2.js"
   },
-  "devDependencies": { "playwright": "^1.48.0", "pdf-lib": "1.17.1" }
+  "devDependencies": {
+    "playwright": "^1.48.0",
+    "pdf-lib": "1.17.1"
+  }
 }
