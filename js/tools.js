@@ -53,7 +53,7 @@ export class ToolController {
     guides?.penAt(ev.sx, ev.sy);
     const hit = this.viewer.pageAtScreen(ev.sx, ev.sy);
     if (!hit) return;
-    this.cur = { tool, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy };
+    this.cur = { tool, name, override: !!ev.toolOverride, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy };
     tool.begin(this.cur, ev);
   }
 
@@ -76,7 +76,10 @@ export class ToolController {
     this.cur = null;
     this.snap = null;
     this.app.guides?.penUp();
-    if (c) c.tool.end(c);
+    if (!c) return;
+    c.tool.end(c);
+    // 지우개를 도구로 골라 한 번 쓴 경우 (펜 지우개 끝/버튼으로 잠깐 쓴 지우개는 제외)
+    if (c.name === 'eraser' && !c.override) this.app.onEraserUsed?.();
   }
 
   cancel() {

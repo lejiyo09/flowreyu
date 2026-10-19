@@ -67,6 +67,10 @@ const app = {
   onSelection: (sel, dragging, m) => renderSelection(sel, dragging, m),
   editText: (page, item, x, y) => startTextEdit(page, item, x, y),
   editLink: (page, item, rect) => editLink(page, item, rect),
+  onEraserUsed: () => {
+    if (!settings.get('eraser').autoReturn || settings.get('tool') !== 'eraser') return;
+    selectTool(toolBeforeEraser || 'pen');
+  },
   tap: (sx, sy) => followLinkAt(sx, sy),
   // 펜 두 번 탭 메뉴: 첫 탭이 남긴 편집을 기록 없이 되돌리기 위한 표식
   historyMark: () => (state.doc ? { len: state.doc.undoStack.length, top: state.doc.undoStack[state.doc.undoStack.length - 1] } : null),
@@ -691,8 +695,13 @@ const TOOL_NAMES = { pen: '펜', hl: '형광펜', eraser: '지우개', lasso: '�
 
 function toolCfgKey(tool) { return ['pen', 'hl', 'text', 'shape'].includes(tool) ? tool : null; }
 
+// 지우개로 바꾸기 직전의 도구 (지우개 "한 번 쓰고 돌아가기"용)
+let toolBeforeEraser = settings.get('tool') === 'eraser' ? 'pen' : settings.get('tool');
+
 function selectTool(tool) {
-  if (settings.get('tool') !== tool) {
+  const prev = settings.get('tool');
+  if (prev !== tool) {
+    if (tool === 'eraser') toolBeforeEraser = prev;
     commitTextEdit();
     if (tool !== 'lasso') tools.clearSelection();
     settings.set('tool', tool);
@@ -834,6 +843,9 @@ function renderToolPopup(tool) {
     seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { settings.set('eraser', { ...settings.get('eraser'), mode: b.value }); renderToolPopup('eraser'); }));
     pop.appendChild(seg);
     pop.appendChild(slider('크기', 'eraser.size', 4, 80, 1, (v) => `${v}px`));
+    const ar = h(`<div class="row"><span>한 번 지우면 이전 도구로</span><input type="checkbox" class="switch" ${er.autoReturn ? 'checked' : ''}></div>`);
+    ar.querySelector('input').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
+    pop.appendChild(ar);
     const clr = h('<div class="row"><span>현재 페이지</span><button class="btn sm danger">페이지 필기 모두 지우기</button></div>');
     clr.querySelector('button').addEventListener('click', () => {
       const d = state.doc; if (!d) return;
@@ -999,7 +1011,10 @@ function openSettings() {
   $('#btnBackupExport').disabled = $('#btnBackupImport').disabled = !state.doc;
   dlg.showModal();
 }
+$('#setEraserReturn').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
+
 function syncSettingsForm() {
+  $('#setEraserReturn').checked = !!settings.get('eraser').autoReturn;
   for (const el of dlg.querySelectorAll('[data-setting]')) {
     const k = el.dataset.setting, v = settings.get(k);
     if (el.classList.contains('seg')) el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.value === v));
