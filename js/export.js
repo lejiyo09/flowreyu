@@ -1,9 +1,10 @@
 // 필기를 포함한 PDF 내보내기, 빈 노트 생성 (pdf-lib)
 import {
-  PDFDocument, PDFName, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix,
-  moveTo, lineTo, appendBezierCurve, closePath, fill, setFillingRgbColor, setGraphicsState, drawObject,
+  PDFDocument, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix,
+  moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
+  setStrokingRgbColor, setGraphicsState, drawObject,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
-import { addCapsules, strokeRadii, shapePolylines, textLayout, drawItem } from './ink.js';
+import { strokeRuns, shapePolylines, textLayout, drawItem } from './ink.js';
 
 function hexToRgb(hex) {
   let h = hex.replace('#', '');
@@ -18,22 +19,13 @@ function invert(m) {
   return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
 }
 
-/** Path2D 대신 PDF 연산자를 쌓는 기록기 (addCapsules 재사용) */
-class OpSink {
-  constructor() { this.ops = []; }
-  moveTo(x, y) { this.ops.push(moveTo(x, y)); }
-  lineTo(x, y) { this.ops.push(lineTo(x, y)); }
-  closePath() { this.ops.push(closePath()); }
-  arc(cx, cy, r) {
-    // 원을 베지어 4개로 근사 (시계 방향 = Path2D arc 0→2π 와 같은 방향)
-    const k = 0.5522847498 * r;
-    this.ops.push(
-      appendBezierCurve(cx + r, cy + k, cx + k, cy + r, cx, cy + r),
-      appendBezierCurve(cx - k, cy + r, cx - r, cy + k, cx - r, cy),
-      appendBezierCurve(cx - r, cy - k, cx - k, cy - r, cx, cy - r),
-      appendBezierCurve(cx + k, cy - r, cx + r, cy - k, cx + r, cy),
-    );
-  }
+/** 폴리라인을 PDF 선 그리기 연산자로 (둥근 끝·이음: 화면과 같은 모양) */
+function polylineOps(pts, width) {
+  const ops = [setLineWidth(width), moveTo(pts[0], pts[1])];
+  if (pts.length === 2) ops.push(lineTo(pts[0], pts[1])); // 점: 길이 0 선 + 둥근 끝 = 원
+  for (let i = 2; i < pts.length; i += 2) ops.push(lineTo(pts[i], pts[i + 1]));
+  ops.push(stroke());
+  return ops;
 }
 
 /**
@@ -44,7 +36,6 @@ class OpSink {
 export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onProgress) {
   const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false });
   const pages = pdf.getPages();
-  const gsCache = new Map();
   const gs = (page, key, dict) => {
     const name = page.node.newExtGState('GS', pdf.context.obj(dict));
     return name;
@@ -71,18 +62,11 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
         ops.push(pushGraphicsState(), setGraphicsState(gsNormal), concatTransformationMatrix(L.w, 0, 0, -L.h, it.x, it.y + L.h), drawObject(xo), popGraphicsState());
         continue;
       }
-      const sink = new OpSink();
-      if (it.t === 's') addCapsules(sink, it.pts, strokeRadii(it));
-      else if (it.t === 'sh') {
-        for (const pl of shapePolylines(it)) {
-          const pts = [];
-          for (let k = 0; k < pl.length; k += 2) pts.push(pl[k], pl[k + 1], 0.5);
-          addCapsules(sink, pts, new Float32Array(pts.length / 3).fill(it.w / 2));
-        }
-      }
-      if (!sink.ops.length) continue;
       const [r, g, b] = hexToRgb(it.c);
-      ops.push(setGraphicsState(it.tool === 'hl' ? gsMul : gsNormal), setFillingRgbColor(r, g, b), ...sink.ops, fill());
+      ops.push(setGraphicsState(it.tool === 'hl' ? gsMul : gsNormal), setStrokingRgbColor(r, g, b),
+        setLineCap(LineCapStyle.Round), setLineJoin(LineJoinStyle.Round));
+      if (it.t === 's') for (const run of strokeRuns(it)) ops.push(...polylineOps(run.pts, run.w));
+      else if (it.t === 'sh') for (const pl of shapePolylines(it)) ops.push(...polylineOps(pl, it.w));
     }
     ops.push(popGraphicsState());
     page.pushOperators(...ops);

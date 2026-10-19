@@ -46,6 +46,7 @@ export class Viewer extends Emitter {
     this.renderPaused = false;
     this._resumeWaiters = [];
     this._inkFrame = 0;
+    this.inkCost = 0; this.drawnCam = null; this.inkOffset = false; this._lastFullInk = 0;
     this._settleTimer = 0;
     this._renderGen = 0;
     this.selection = null; // {page, ids:Set, m:{s,ox,oy,dx,dy}} 이동 중 미리보기
@@ -185,7 +186,7 @@ export class Viewer extends Emitter {
   applyCamera() {
     const { tx, ty, z } = this.cam;
     this.world.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${z})`;
-    this.requestInk();
+    this._inkFollowCamera();
     this.emit('camera');
     this.scheduleRender();
   }
@@ -320,7 +321,12 @@ export class Viewer extends Emitter {
   /** 펜 입력 중에는 PDF 렌더링을 잠시 멈춰 필기 지연을 줄인다 */
   pauseRender(p) {
     this.renderPaused = p;
-    if (!p) { const w = this._resumeWaiters; this._resumeWaiters = []; w.forEach((f) => f()); this.scheduleRender(60); }
+    if (!p) {
+      const w = this._resumeWaiters; this._resumeWaiters = []; w.forEach((f) => f());
+      // 이어서 진행만 한다. scheduleRender 를 부르면 진행 중인 고해상도 렌더가 취소되어
+      // 획을 계속 쓰는 동안 페이지가 영영 선명해지지 않는다.
+      if (!this.renderBusy) { clearTimeout(this._settleTimer); this._settleTimer = setTimeout(() => this._renderLoop(), 60); }
+    }
   }
 
   scheduleRender(delay = 140) {
@@ -480,6 +486,23 @@ export class Viewer extends Emitter {
     this._inkFrame = requestAnimationFrame(() => { this._inkFrame = 0; this.drawInk(); });
   }
 
+  /**
+   * 카메라가 움직일 때 필기 레이어 처리.
+   * 가벼운 페이지는 매 프레임 벡터로 다시 그리고, 무거운 페이지(다시 그리기 > 10ms)는
+   * 마지막으로 그린 비트맵을 CSS 변환으로 따라가게 한 뒤 움직임이 멈추면(또는 300ms마다) 선명하게 다시 그린다.
+   */
+  _inkFollowCamera() {
+    if (!this.inkCost || this.inkCost < 10 || !this.drawnCam) { this.requestInk(); return; }
+    const d = this.drawnCam, c = this.cam, k = c.z / d.z;
+    const t = `translate(${c.tx - d.tx * k}px, ${c.ty - d.ty * k}px) scale(${k})`;
+    this.hlCanvas.style.transform = t;
+    this.inkCanvas.style.transform = t;
+    this.inkOffset = true;
+    clearTimeout(this._inkSettle);
+    this._inkSettle = setTimeout(() => this.requestInk(), 90);
+    if (performance.now() - this._lastFullInk > 300) this.requestInk();
+  }
+
   /** 페이지 좌표계로 ctx 변환 (dpr 포함) */
   pageTransform(ctx, p) {
     const { tx, ty, z } = this.cam, d = this.dpr;
@@ -487,6 +510,16 @@ export class Viewer extends Emitter {
   }
 
   drawInk() {
+    const t0 = performance.now();
+    this._drawInk();
+    const dt = performance.now() - t0;
+    this.inkCost = this.inkCost ? this.inkCost * 0.7 + dt * 0.3 : dt;
+    this._lastFullInk = performance.now();
+    this.drawnCam = { ...this.cam };
+    if (this.inkOffset) { this.hlCanvas.style.transform = ''; this.inkCanvas.style.transform = ''; this.inkOffset = false; }
+  }
+
+  _drawInk() {
     const hl = this.hlCtx, ink = this.inkCtx;
     hl.setTransform(1, 0, 0, 1, 0, 0);
     ink.setTransform(1, 0, 0, 1, 0, 0);
@@ -528,6 +561,22 @@ export class Viewer extends Emitter {
       ink.restore();
     }
     this.emit('inkdrawn');
+  }
+
+  /** 새 객체 하나만 현재 화면에 덧그린다. 전체 다시 그리기가 필요한 상태면 false */
+  appendItem(page, item) {
+    if (this._inkFrame || this.selection?.m || this.hidden || this.inkOffset) return false;
+    const p = this.pages[page];
+    if (!p) return false;
+    const ctx = isHighlighter(item) ? this.hlCtx : this.inkCtx;
+    ctx.save();
+    this.pageTransform(ctx, p);
+    ctx.beginPath();
+    ctx.rect(0, 0, p.w, p.h);
+    ctx.clip();
+    drawItem(ctx, item);
+    ctx.restore();
+    return true;
   }
 
   clearLive() {

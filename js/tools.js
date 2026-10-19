@@ -2,7 +2,7 @@
 // 입력 엔진(input.js)은 화면 좌표만 넘기고, 도구가 페이지 좌표로 변환해 문서를 수정한다.
 import { settings } from './settings.js';
 import {
-  addCapsules, pressureFactor, roundPts, simplifyPts, hitTestSweep, eraseStrokePart,
+  widthBucket, pressureFactor, roundPts, simplifyPts, hitTestSweep, eraseStrokePart,
   insideLasso, bbox, transformItem, shapePolylines, hitTest,
 } from './ink.js';
 import { uid, dist, now } from './util.js';
@@ -162,11 +162,8 @@ class PenTool {
     c.width = cfg.width;
     c.pr = this.kind === 'pen' && settings.get('pressure') && ev.kind === 'pen';
     c.pts = [];
-    c.radii = [];
     c.prevP = ev.p;
-    c.path = 0;
-    c.livePath = new Path2D();
-    c.drawnFrom = 0;
+    c.runs = []; // 그리는 중인 두께별 구간 (ink.strokeRuns 와 같은 규칙)
     c.smooth = Math.min(settings.get('smoothing'), 10) * 0.065; // 0 ~ 0.65
     c.minStep = 0.35 / v.cam.z; // 화면 0.35px 미만 이동은 무시
     v.liveCanvas.style.mixBlendMode = this.kind === 'hl' ? 'multiply' : 'normal';
@@ -182,11 +179,27 @@ class PenTool {
       if (c.smooth > 0) { x = lx + (x - lx) * (1 - c.smooth); y = ly + (y - ly) * (1 - c.smooth); }
       if (Math.hypot(x - lx, y - ly) < c.minStep) return false;
     }
-    c.pts.push(x, y, p);
-    // ink.strokeRadii 와 같은 방식으로 필압 평활화 → 그리는 중과 저장 후 모양이 같다
-    c.prevP = c.prevP + (p - c.prevP) * 0.5;
-    c.radii.push(c.pr ? (c.width / 2) * pressureFactor(c.prevP) : c.width / 2);
+    this.pushPoint(c, x, y, p);
     return true;
+  }
+
+  /** 점 추가 + 구간 갱신. 두께 계산은 ink.strokeRadii 와 같은 필압 평활화 → 그리는 중과 저장 후 모양이 같다 */
+  pushPoint(c, x, y, p) {
+    const n = c.pts.length;
+    const px = n ? c.pts[n - 3] : x, py = n ? c.pts[n - 2] : y;
+    c.pts.push(x, y, p);
+    c.prevP = c.prevP + (p - c.prevP) * 0.5;
+    const w = c.pr ? c.width * pressureFactor(c.prevP) : c.width;
+    const b = c.pr ? widthBucket(w) : 0;
+    let run = c.runs[c.runs.length - 1];
+    if (!run || run.b !== b) {
+      run = { b, w: c.pr ? Math.exp(b * Math.log(1.05)) : c.width, path: new Path2D(), count: 0, x, y };
+      if (n) { run.path.moveTo(px, py); run.count = 1; } else run.path.moveTo(x, y);
+      c.runs.push(run);
+    }
+    if (run.count > 0) run.path.lineTo(x, y);
+    run.count++;
+    run.x = x; run.y = y;
   }
 
   move(c, pts, pred, isFinal) {
@@ -196,34 +209,32 @@ class PenTool {
       const last = pts[pts.length - 1];
       const { x, y } = this.ctl.toPage(c.page, last.sx, last.sy);
       const n = c.pts.length;
-      if (Math.hypot(x - c.pts[n - 3], y - c.pts[n - 2]) > c.minStep) { c.pts.push(x, y, c.pts[n - 1]); c.radii.push(c.radii[c.radii.length - 1]); }
+      if (Math.hypot(x - c.pts[n - 3], y - c.pts[n - 2]) > c.minStep) this.pushPoint(c, x, y, c.pts[n - 1]);
     }
     this.ctl.requestLive(() => this.draw(c, pred));
   }
 
   draw(c, pred) {
     const v = this.ctl.viewer;
-    // 새로 추가된 점만 Path2D에 이어 붙인다 (긴 획에서도 가벼움)
-    const n = c.pts.length / 3;
-    if (n > c.drawnFrom) {
-      addCapsules(c.livePath, c.pts, c.radii, c.drawnFrom === 0 ? 0 : c.drawnFrom);
-      c.drawnFrom = n;
-    }
     const ctx = v.liveCtx;
     v.clearLive();
     const p = v.pages[c.page];
     v.pageTransform(ctx, p);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, p.w, p.h); ctx.clip();
-    ctx.fillStyle = c.color;
-    ctx.fill(c.livePath);
-    if (pred && n) {
+    ctx.strokeStyle = ctx.fillStyle = c.color;
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const r of c.runs) {
+      if (r.count === 1) { ctx.beginPath(); ctx.arc(r.x, r.y, r.w / 2, 0, Math.PI * 2); ctx.fill(); continue; }
+      ctx.lineWidth = r.w;
+      ctx.stroke(r.path);
+    }
+    const last = c.runs[c.runs.length - 1];
+    if (pred && last) {
       // 예측 점: 화면에만 잠깐 보여 주고 저장하지 않음 → 체감 지연 감소
       const { x, y } = this.ctl.toPage(c.page, pred.sx, pred.sy);
-      const lx = c.pts[(n - 1) * 3], ly = c.pts[(n - 1) * 3 + 1], r = c.radii[n - 1];
-      const tmp = new Path2D();
-      addCapsules(tmp, [lx, ly, 0, x, y, 0], [r, r]);
-      ctx.fill(tmp);
+      ctx.lineWidth = last.w;
+      ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(x, y); ctx.stroke();
     }
     ctx.restore();
   }
@@ -234,8 +245,8 @@ class PenTool {
     if (c.pts.length) {
       const pts = roundPts(c.pts.length > 9 ? simplifyPts(c.pts, 0.04) : c.pts);
       const item = { id: uid('s'), t: 's', tool: this.kind, c: c.color, w: c.width, pr: c.pr, pts };
+      // 문서 변경 이벤트에서 새 획만 덧그린다 (전체 다시 그리기 없음) → 그 뒤 라이브 레이어 지움
       this.ctl.doc.add(c.page, item);
-      v.drawInk(); // 동기적으로 그린 뒤 라이브 레이어를 지워 깜빡임 방지
     }
     v.clearLive();
   }
@@ -518,7 +529,6 @@ class ShapeTool {
     const v = this.ctl.viewer;
     if (Math.hypot(c.x2 - c.x1, c.y2 - c.y1) * v.cam.z > 6) {
       this.ctl.doc.add(c.page, this.shape(c));
-      v.drawInk();
     }
     v.clearLive();
   }

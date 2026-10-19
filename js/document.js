@@ -56,17 +56,18 @@ export class NoteDocument extends Emitter {
   }
 
   /** 페이지 객체 배열 교체 (불변 갱신) */
-  setItems(page, items, { record = true } = {}) {
+  setItems(page, items, { record = true, appended = null } = {}) {
     const auto = record && !this.tx;
     if (auto) this.begin();
     if (record) this._touch(page);
     this.pages.set(page, items);
     this._markDirty(page);
     if (auto) this.commit();
-    this.emit('change', { page });
+    this.emit('change', { page, appended });
   }
 
-  add(page, item) { this.setItems(page, [...this.items(page), item]); }
+  /** 맨 위에 객체 추가. appended 로 알려 화면은 새 객체만 덧그리면 된다 */
+  add(page, item) { this.setItems(page, [...this.items(page), item], { appended: item }); }
 
   commit() {
     const tx = this.tx;

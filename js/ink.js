@@ -36,51 +36,36 @@ export function strokeRadii(item) {
   return r;
 }
 
-/**
- * 가변 두께 획을 "캡슐(원 + 사각형)" 합집합으로 Path2D에 추가한다.
- * 모든 하위 경로의 감기 방향을 통일하므로 nonzero 채우기에서 구멍이 생기지 않는다.
- * sink: {moveTo, lineTo, arc, closePath} 인터페이스 (Path2D 또는 내보내기용 기록기)
- */
-export function addCapsules(sink, pts, radii, from = 0) {
-  const n = pts.length / 3;
-  if (n === 0) return;
-  const circle = (x, y, r) => { sink.moveTo(x + r, y); sink.arc(x, y, r, 0, Math.PI * 2); sink.closePath(); };
-  if (n === 1) { circle(pts[0], pts[1], radii[0]); return; }
-  const start = Math.max(0, from);
-  for (let i = start; i < n; i++) {
-    const x = pts[i * 3], y = pts[i * 3 + 1], r = radii[i];
-    // 꺾이는 곳·끝점에만 원을 넣는다 (직선 구간은 사각형끼리 겹쳐 충분함)
-    let needCircle = i === 0 || i === n - 1;
-    if (!needCircle && i > 0) {
-      const ax = x - pts[(i - 1) * 3], ay = y - pts[(i - 1) * 3 + 1];
-      const bx = pts[(i + 1) * 3] - x, by = pts[(i + 1) * 3 + 1] - y;
-      const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
-      if (la > 0 && lb > 0) {
-        const cos = (ax * bx + ay * by) / (la * lb);
-        needCircle = cos < 0.99 || Math.abs(radii[i - 1] - r) > r * 0.15;
-      }
-    }
-    if (needCircle) circle(x, y, r);
-    if (i > 0) {
-      const px = pts[(i - 1) * 3], py = pts[(i - 1) * 3 + 1], pr = radii[i - 1];
-      const dx = x - px, dy = y - py, L = Math.hypot(dx, dy);
-      if (L < 1e-6) continue;
-      const nx = -dy / L, ny = dx / L;
-      const q = [px + nx * pr, py + ny * pr, x + nx * r, y + ny * r, x - nx * r, y - ny * r, px - nx * pr, py - ny * pr];
-      // 시계 방향(화면 기준 양의 면적)으로 맞춘다
-      let area = 0;
-      for (let k = 0; k < 4; k++) {
-        const k2 = (k + 1) % 4;
-        area += q[k * 2] * q[k2 * 2 + 1] - q[k2 * 2] * q[k * 2 + 1];
-      }
-      if (area < 0) {
-        sink.moveTo(q[6], q[7]); sink.lineTo(q[4], q[5]); sink.lineTo(q[2], q[3]); sink.lineTo(q[0], q[1]);
-      } else {
-        sink.moveTo(q[0], q[1]); sink.lineTo(q[2], q[3]); sink.lineTo(q[4], q[5]); sink.lineTo(q[6], q[7]);
-      }
-      sink.closePath();
-    }
+// ── 가변 두께 획 그리기 ──
+// 점마다 두께가 다른 획을 "두께가 거의 같은 구간(run)"으로 나눠 각 구간을 하나의 폴리라인으로 그린다.
+// 캔버스/PDF 의 둥근 이음(round join)·둥근 끝(round cap)을 쓰므로 두꺼운 획도 외곽이 매끈하고,
+// 획 하나당 그리기 호출이 몇 번뿐이라 빠르다. 구간 경계는 같은 점을 공유해 이음매가 없다.
+const WIDTH_STEP = Math.log(1.05); // 두께 5% 단위로 구간을 나눈다
+
+export function widthBucket(w) { return Math.round(Math.log(Math.max(w, 0.01)) / WIDTH_STEP); }
+
+/** 획 → [{w, pts:[x,y,...]}] (두께별 구간) */
+export function strokeRuns(item) {
+  const radii = strokeRadii(item);
+  const p = item.pts, n = p.length / 3;
+  if (!item.pr) {
+    const pts = [];
+    for (let i = 0; i < n; i++) pts.push(p[i * 3], p[i * 3 + 1]);
+    return [{ w: item.w, pts }];
   }
+  const runs = [];
+  let cur = null, curB = 0;
+  for (let i = 0; i < n; i++) {
+    const w = radii[i] * 2, b = widthBucket(w);
+    if (!cur || b !== curB) {
+      cur = { w: Math.exp(b * WIDTH_STEP), pts: [] };
+      if (i > 0) cur.pts.push(p[(i - 1) * 3], p[(i - 1) * 3 + 1]); // 이전 점에서 시작 → 끊김 없음
+      runs.push(cur);
+      curB = b;
+    }
+    cur.pts.push(p[i * 3], p[i * 3 + 1]);
+  }
+  return runs;
 }
 
 /** 도형 → 폴리라인 목록 (페이지 좌표) */
@@ -159,26 +144,45 @@ export function bbox(item) {
   return e.bbox || (e.bbox = computeBBox(item));
 }
 
+/** 그리기용 경로 캐시: 획은 [{w, path, dot}] 구간 목록, 도형은 Path2D 하나 */
 export function itemPath(item) {
   const e = entry(item);
   if (e.path) return e.path;
-  const path = new Path2D();
-  if (item.t === 's') addCapsules(path, item.pts, strokeRadii(item));
-  else if (item.t === 'sh') {
+  if (item.t === 's') {
+    e.path = strokeRuns(item).map((r) => {
+      const path = new Path2D();
+      path.moveTo(r.pts[0], r.pts[1]);
+      for (let i = 2; i < r.pts.length; i += 2) path.lineTo(r.pts[i], r.pts[i + 1]);
+      return { w: r.w, path, dot: r.pts.length === 2 ? [r.pts[0], r.pts[1]] : null };
+    });
+  } else if (item.t === 'sh') {
+    const path = new Path2D();
     for (const pl of shapePolylines(item)) {
       path.moveTo(pl[0], pl[1]);
       for (let i = 2; i < pl.length; i += 2) path.lineTo(pl[i], pl[i + 1]);
     }
+    e.path = path;
   }
-  e.path = path;
-  return path;
+  return e.path;
+}
+
+/** 구간 목록 그리기 (ctx 는 페이지 좌표계) */
+export function strokeRunPaths(ctx, runs, color) {
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (const r of runs) {
+    if (r.dot) { ctx.beginPath(); ctx.arc(r.dot[0], r.dot[1], r.w / 2, 0, Math.PI * 2); ctx.fill(); continue; }
+    ctx.lineWidth = r.w;
+    ctx.stroke(r.path);
+  }
 }
 
 /** ctx는 이미 페이지 좌표계로 변환되어 있어야 한다 */
 export function drawItem(ctx, item) {
   if (item.t === 's') {
-    ctx.fillStyle = item.c;
-    ctx.fill(itemPath(item));
+    strokeRunPaths(ctx, itemPath(item), item.c);
   } else if (item.t === 'sh') {
     ctx.strokeStyle = item.c;
     ctx.lineWidth = item.w;

@@ -87,11 +87,17 @@ document.addEventListener('pointerdown', (e) => {
   if (!$('#quickMenu').hidden && !e.target.closest('#quickMenu') && !e.target.closest('#viewport')) closeQuickMenu();
 }, true);
 
+// 카메라 이벤트는 제스처 중 매 프레임 오므로 UI 갱신은 프레임당 한 번으로 묶는다
+let uiFrame = 0;
 viewer.on('camera', () => {
-  updateZoomLabel();
-  updatePageIndicator();
-  positionOverlays();
-  saveViewSoon();
+  if (uiFrame) return;
+  uiFrame = requestAnimationFrame(() => {
+    uiFrame = 0;
+    updateZoomLabel();
+    updatePageIndicator();
+    positionOverlays();
+    saveViewSoon();
+  });
 });
 viewer.on('resize', () => { positionOverlays(); });
 viewer.on('sized', () => { thumbs.resizeBoxes(); updatePageIndicator(); });
@@ -301,7 +307,11 @@ async function openDoc(id) {
 }
 
 function wireDoc(doc) {
-  doc.on('change', ({ page }) => { viewer.requestInk(); thumbs.markInk(page); });
+  doc.on('change', ({ page, appended }) => {
+    // 새 획 하나만 추가된 경우는 그 획만 덧그리고, 그 밖의 변경은 전체를 다시 그린다
+    if (!(appended && viewer.appendItem(page, appended))) viewer.requestInk();
+    thumbs.markInk(page);
+  });
   doc.on('history', () => updateHistoryButtons());
   doc.on('save', () => renderSaveState());
 }
