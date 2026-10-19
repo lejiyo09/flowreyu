@@ -115,6 +115,24 @@ export async function savePages(docId, records, docPatch) {
   return tx2p(tx);
 }
 
+/**
+ * 페이지 구조 변경(추가/삭제) 저장: PDF 원본 교체 + 필기 레코드 전체 재작성 + 메타 갱신을 한 트랜잭션으로.
+ * 중간에 실패하면 아무것도 바뀌지 않는다 (PDF 와 필기 페이지 번호가 어긋나는 일 방지).
+ */
+export async function replaceDocStructure(docId, blob, records, docPatch) {
+  const tx = await store(['docs', 'files', 'pages'], 'readwrite');
+  tx.objectStore('files').put({ id: docId, data: blob });
+  const ps = tx.objectStore('pages');
+  const keys = await req2p(ps.index('byDoc').getAllKeys(IDBKeyRange.only(docId)));
+  for (const k of keys) ps.delete(k);
+  const t = Date.now();
+  for (const r of records) if (r.items.length) ps.put({ docId, page: r.page, items: r.items, rev: r.rev, saved: t, v: 1 });
+  const ds = tx.objectStore('docs');
+  const cur = await req2p(ds.get(docId));
+  if (cur) ds.put({ ...cur, ...docPatch, updated: t });
+  return tx2p(tx);
+}
+
 export async function deleteDoc(id) {
   const tx = await store(['docs', 'files', 'pages', 'kv'], 'readwrite');
   tx.objectStore('docs').delete(id);

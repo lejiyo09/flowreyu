@@ -88,6 +88,10 @@
         <span>페이지</span>
         <label class="goto">이동 <input type="number" id="gotoPage" min="1" inputmode="numeric"></label>
       </div>
+      <div class="thumbs-actions">
+        <button class="btn sm" id="btnAddPage" title="현재 페이지 뒤에 빈 페이지 추가"><svg><use href="#i-plus"/></svg><span>페이지 추가</span></button>
+        <button class="icon-btn sm" id="btnDelPage" title="현재 페이지 삭제"><svg><use href="#i-trash"/></svg></button>
+      </div>
       <div class="thumbs-list" id="thumbList"></div>
     </aside>
 
@@ -238,6 +242,22 @@
       <div class="row"><span>페이지 수</span><input type="number" id="nnPages" value="20" min="1" max="500"></div>
     </div>
     <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok" id="nnOk">만들기</button></footer>
+  </form>
+</dialog>
+
+<dialog id="addPageDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner">
+    <header class="dlg-head"><h2>페이지 추가</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+      <div class="row"><span>위치</span>
+        <select id="apWhere"><option value="after">현재 페이지 뒤</option><option value="before">현재 페이지 앞</option><option value="end">맨 뒤</option></select>
+      </div>
+      <div class="row"><span>속지</span>
+        <select id="apTemplate"><option value="blank">무지</option><option value="lined">줄 노트</option><option value="grid">모눈 (5mm)</option><option value="dot">점 격자</option></select>
+      </div>
+      <div class="row"><span>개수</span><input type="number" id="apCount" value="1" min="1" max="50"></div>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">추가</button></footer>
   </form>
 </dialog>
 

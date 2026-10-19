@@ -92,25 +92,46 @@ async function textImage(pdf, it) {
   return img;
 }
 
-/** 빈 노트 PDF 만들기. template: blank | lined | grid | dot */
+/** 속지 그리기 (pdf-lib 페이지에). template: blank | lined | grid | dot */
+function drawTemplate(page, template) {
+  const { width: W, height: H } = page.getSize();
+  const line = rgb(0.72, 0.8, 0.9);
+  if (template === 'lined') {
+    for (let y = H - 72; y > 40; y -= 24) page.drawLine({ start: { x: 36, y }, end: { x: W - 36, y }, thickness: 0.5, color: line });
+  } else if (template === 'grid') {
+    const s = 14.17; // 5mm
+    for (let x = 28; x < W - 20; x += s) page.drawLine({ start: { x, y: 28 }, end: { x, y: H - 28 }, thickness: 0.3, color: line });
+    for (let y = 28; y < H - 20; y += s) page.drawLine({ start: { x: 28, y }, end: { x: W - 28, y }, thickness: 0.3, color: line });
+  } else if (template === 'dot') {
+    const s = 14.17;
+    for (let x = 28; x < W - 20; x += s) for (let y = 28; y < H - 20; y += s) page.drawCircle({ x, y, size: 0.6, color: rgb(0.6, 0.66, 0.75) });
+  }
+}
+
+export const PAGE_SIZES = { A4: [595.28, 841.89], Letter: [612, 792] };
+
+/** 빈 노트 PDF 만들기 */
 export async function createBlankPdf(pageCount, template, size = 'A4') {
   const pdf = await PDFDocument.create();
-  const [W, H] = size === 'Letter' ? [612, 792] : [595.28, 841.89];
-  const line = rgb(0.72, 0.8, 0.9);
-  for (let i = 0; i < pageCount; i++) {
-    const page = pdf.addPage([W, H]);
-    if (template === 'lined') {
-      for (let y = H - 72; y > 40; y -= 24) page.drawLine({ start: { x: 36, y }, end: { x: W - 36, y }, thickness: 0.5, color: line });
-    } else if (template === 'grid') {
-      const s = 14.17; // 5mm
-      for (let x = 28; x < W - 20; x += s) page.drawLine({ start: { x, y: 28 }, end: { x, y: H - 28 }, thickness: 0.3, color: line });
-      for (let y = 28; y < H - 20; y += s) page.drawLine({ start: { x: 28, y }, end: { x: W - 28, y }, thickness: 0.3, color: line });
-    } else if (template === 'dot') {
-      const s = 14.17;
-      for (let x = 28; x < W - 20; x += s) for (let y = 28; y < H - 20; y += s) page.drawCircle({ x, y, size: 0.6, color: rgb(0.6, 0.66, 0.75) });
-    }
-  }
+  const [W, H] = PAGE_SIZES[size] || PAGE_SIZES.A4;
+  for (let i = 0; i < pageCount; i++) drawTemplate(pdf.addPage([W, H]), template);
   pdf.setTitle('새 노트');
   pdf.setProducer('FlexNote');
   return pdf.save();
+}
+
+/** index 위치에 빈 페이지 삽입 (width/height 는 화면에 보이는 크기, 회전 없는 새 페이지) */
+export async function insertBlankPage(bytes, index, { template = 'blank', width = 595.28, height = 841.89 } = {}) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  const page = pdf.insertPage(Math.min(index, pdf.getPageCount()), [width, height]);
+  drawTemplate(page, template);
+  return pdf.save({ useObjectStreams: true });
+}
+
+/** index 페이지 삭제 */
+export async function removePage(bytes, index) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  if (pdf.getPageCount() <= 1) throw new Error('마지막 한 페이지는 삭제할 수 없습니다');
+  pdf.removePage(index);
+  return pdf.save({ useObjectStreams: true });
 }

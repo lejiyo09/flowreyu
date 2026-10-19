@@ -192,7 +192,7 @@ async function makeThumb(pdf) {
   } catch { return null; }
 }
 
-async function importPdfBytes(bytes, name) {
+async function importPdfBytes(bytes, name, extra = {}) {
   const head = new Uint8Array(bytes, 0, Math.min(1024, bytes.byteLength));
   const sig = String.fromCharCode(...head);
   if (!sig.includes('%PDF')) throw new Error('PDF 파일이 아닙니다');
@@ -201,7 +201,7 @@ async function importPdfBytes(bytes, name) {
   const thumb = await makeThumb(pdf);
   const meta = {
     id: uid('d'), name, size: bytes.byteLength, pageCount: pdf.numPages,
-    created: Date.now(), updated: Date.now(), opened: Date.now(), thumb, view: null,
+    created: Date.now(), updated: Date.now(), opened: Date.now(), thumb, view: null, ...extra,
   };
   await pdf.destroy();
   await store.addDocWithFile(meta, new Blob([bytes], { type: 'application/pdf' }));
@@ -249,7 +249,7 @@ $('#newNoteDlg').addEventListener('close', async () => {
     const { createBlankPdf } = await import('./export.js');
     const bytes = await createBlankPdf(n, $('#nnTemplate').value, $('#nnSize').value);
     const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    const id = await importPdfBytes(buf, name);
+    const id = await importPdfBytes(buf, name, { template: $('#nnTemplate').value });
     busy(null);
     await openDoc(id);
   } catch (e) {
@@ -298,6 +298,7 @@ async function openDoc(id) {
     await viewer.open(pdf, doc, meta.view);
     thumbs.build();
     if (thumbs.open) thumbs.show(true);
+    placeAddPageButton();
     updateHistoryButtons();
     renderSaveState();
     updatePageIndicator();
@@ -440,6 +441,100 @@ async function exportPdf() {
     toast('내보내기 실패: ' + (e?.message || e), { error: true, ms: 6000 });
   } finally { busy(null); }
 }
+
+// ───────────────────────────── 페이지 추가 / 삭제 ─────────────────────────────
+// PDF 자체를 고친 뒤(pdf-lib) 필기의 페이지 번호를 옮기고, PDF·필기·메타를 한 트랜잭션으로 저장한다.
+
+async function restructure(label, editPdf, map, focusPage) {
+  const doc = state.doc;
+  if (!doc) return;
+  commitTextEdit();
+  tools.cancel();
+  tools.clearSelection();
+  busy(label);
+  try {
+    if (!(await doc.flush())) throw new Error('저장되지 않은 필기가 있어 진행할 수 없습니다');
+    const ex = await import('./export.js');
+    const bytes = await editPdf(ex, await state.blob.arrayBuffer());
+    const newPdf = await pdfjsLib.getDocument({ ...PDF_OPTS, data: bytes.slice() }).promise;
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    // 저장이 성공한 뒤에만 메모리 상태를 바꾼다 (실패하면 원래 상태 그대로)
+    const backup = { pages: doc.pages, rev: doc.rev, undo: doc.undoStack, redo: doc.redoStack };
+    doc.remapPages(map);
+    try {
+      await store.replaceDocStructure(doc.id, blob, doc.allRecords(), { pageCount: newPdf.numPages, size: bytes.byteLength });
+    } catch (err) {
+      Object.assign(doc, { pages: backup.pages, rev: backup.rev, undoStack: backup.undo, redoStack: backup.redo });
+      await newPdf.destroy();
+      throw err;
+    }
+    doc.markAllSaved();
+    doc.meta.pageCount = newPdf.numPages;
+    const old = state.pdf;
+    state.pdf = newPdf;
+    state.blob = blob;
+    const view = { page: Math.min(focusPage, newPdf.numPages - 1), fx: 0.5, fy: -0.02, zr: viewer.relZoom() };
+    await viewer.open(newPdf, doc, view);
+    old?.destroy().catch(() => {});
+    thumbs.build();
+    if (thumbs.open) thumbs.show(true);
+    placeAddPageButton();
+    updateHistoryButtons();
+    updatePageIndicator();
+    return true;
+  } catch (e) {
+    console.error(e);
+    toast('페이지를 바꾸지 못했습니다: ' + store.describeError(e), { error: true, ms: 6000 });
+    return false;
+  } finally { busy(null); }
+}
+
+async function addPages(where, template, count = 1) {
+  const cur = viewer.currentPage();
+  const ref = viewer.pages[cur] || viewer.pages[0];
+  const at = where === 'before' ? cur : where === 'end' ? viewer.pages.length : cur + 1;
+  const ok = await restructure(`페이지 ${count}장 추가 중…`, async (ex, bytes) => {
+    let b = bytes;
+    for (let i = 0; i < count; i++) b = await ex.insertBlankPage(b, at, { template, width: ref.w, height: ref.h });
+    return b;
+  }, (i) => (i >= at ? i + count : i), at);
+  if (ok) toast(`${at + 1}쪽에 페이지 ${count}장을 추가했습니다`);
+}
+
+async function deleteCurrentPage() {
+  const cur = viewer.currentPage();
+  if (viewer.pages.length <= 1) { toast('마지막 한 페이지는 삭제할 수 없습니다'); return; }
+  const n = state.doc.items(cur).length;
+  if (!confirm(`${cur + 1}쪽을 삭제할까요?${n ? `\n이 페이지의 필기 ${n}개도 함께 삭제됩니다.` : ''}\n페이지 삭제는 실행 취소할 수 없습니다.`)) return;
+  const ok = await restructure('페이지 삭제 중…', (ex, bytes) => ex.removePage(bytes, cur),
+    (i) => (i === cur ? -1 : i > cur ? i - 1 : i), Math.max(0, cur - (cur === viewer.pages.length - 1 ? 1 : 0)));
+  if (ok) toast(`${cur + 1}쪽을 삭제했습니다`);
+}
+
+$('#btnAddPage').addEventListener('click', () => {
+  $('#apTemplate').value = state.doc?.meta.template || 'blank';
+  $('#addPageDlg').showModal();
+});
+$('#addPageDlg').addEventListener('close', () => {
+  if ($('#addPageDlg').returnValue !== 'ok') return;
+  addPages($('#apWhere').value, $('#apTemplate').value, clamp(parseInt($('#apCount').value, 10) || 1, 1, 50));
+});
+$('#btnDelPage').addEventListener('click', deleteCurrentPage);
+
+// 마지막 페이지 아래 "페이지 추가" 버튼 (월드 좌표에 붙어 함께 움직인다)
+const addEndBtn = document.createElement('button');
+addEndBtn.className = 'add-page-end';
+addEndBtn.dataset.ui = '';
+addEndBtn.innerHTML = '<svg><use href="#i-plus"/></svg><span>페이지 추가</span>';
+addEndBtn.addEventListener('click', () => addPages('end', state.doc?.meta.template || 'blank', 1));
+function placeAddPageButton() {
+  const last = viewer.pages[viewer.pages.length - 1];
+  if (!last) { addEndBtn.remove(); return; }
+  if (addEndBtn.parentNode !== $('#world')) $('#world').appendChild(addEndBtn);
+  // 화면에서 약 44px 높이가 되도록 월드 단위로 크기를 잡되, 버튼 글자는 transform 으로 보정
+  Object.assign(addEndBtn.style, { left: last.x + 'px', top: last.y + last.h + 16 + 'px', width: last.w + 'px', height: '40px' });
+}
+viewer.on('sized', placeAddPageButton);
 
 // ───────────────────────────── Undo / Redo ─────────────────────────────
 

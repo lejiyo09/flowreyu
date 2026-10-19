@@ -171,7 +171,7 @@ export class Viewer extends Emitter {
     const cw = this.contentW * c.z, ch = this.contentH * c.z;
     if (cw + MARGIN * 2 <= this.vw) c.tx = (this.vw - cw) / 2;
     else c.tx = clamp(c.tx, this.vw - cw - MARGIN, MARGIN);
-    const top = MARGIN, bottom = this.vh - ch - MARGIN * 6; // 마지막 페이지 아래 여유
+    const top = MARGIN, bottom = this.vh - ch - 64 * c.z - MARGIN * 2; // 마지막 페이지 아래 "페이지 추가" 버튼까지 보이도록
     if (ch + MARGIN * 2 <= this.vh) c.ty = clamp(c.ty, Math.min(top, bottom), Math.max(top, (this.vh - ch) / 2));
     else c.ty = clamp(c.ty, Math.min(bottom, top), top);
     return c;

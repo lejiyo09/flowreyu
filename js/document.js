@@ -175,6 +175,40 @@ export class NoteDocument extends Emitter {
     this.closed = true;
   }
 
+  /**
+   * 페이지 번호 재배치 (페이지 추가/삭제 후). map(oldIndex) → newIndex, 삭제된 페이지는 -1.
+   * Undo 기록의 페이지 번호도 함께 옮겨서 이전 편집을 계속 되돌릴 수 있게 한다.
+   */
+  remapPages(map) {
+    if (this.tx) this.commit();
+    const remap = (m) => {
+      const out = new Map();
+      for (const [k, v] of m) { const n = map(k); if (n >= 0) out.set(n, v); }
+      return out;
+    };
+    this.pages = remap(this.pages);
+    this.rev = remap(this.rev);
+    this.dirty = new Set([...this.dirty].map(map).filter((n) => n >= 0));
+    const fix = (stack) => stack
+      .map((entry) => entry.map((e) => ({ ...e, page: map(e.page) })).filter((e) => e.page >= 0))
+      .filter((entry) => entry.length);
+    this.undoStack = fix(this.undoStack);
+    this.redoStack = fix(this.redoStack);
+    this.emit('history');
+  }
+
+  /** 저장용 전체 레코드 */
+  allRecords() {
+    return [...this.pages].map(([page, items]) => ({ page, items, rev: this.rev.get(page) || 0 }));
+  }
+
+  /** 구조 변경 저장이 끝난 뒤: 모든 변경이 저장된 상태 */
+  markAllSaved() {
+    this._saveSoon.cancel();
+    this.dirty.clear();
+    this._setState('saved');
+  }
+
   totalItems() {
     let n = 0;
     for (const it of this.pages.values()) n += it.length;
