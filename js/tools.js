@@ -90,10 +90,10 @@ export class ToolController {
     this.snap = null;
     this.app.guides?.penUp();
     if (!c) return;
-    // 짧은 탭이 접힌 포스트잇이나 펼친 포스트잇의 접기 버튼 위면: 그리지 않고 접기/펼치기
+    // 짧은 탭이 접힌 포스트잇·접기 버튼·체크 상자 위면: 그리지 않고 그 동작만
     if (c.path < 6 && now() - c.t0 < 350) {
       const p = this.toPage(c.page, c.sx0, c.sy0);
-      if (this.app.foldAt?.(c.page, p.x, p.y)) { c.tool.cancel(c); this.viewer.clearLive(); return; }
+      if (this.app.tapObjectAt?.(c.page, p.x, p.y)) { c.tool.cancel(c); this.viewer.clearLive(); return; }
     }
     c.tool.end(c);
     // 지우개를 도구로 골라 한 번 쓴 경우 (펜 지우개 끝/버튼으로 잠깐 쓴 지우개는 제외)
@@ -531,7 +531,7 @@ class TextTool {
     const items = this.ctl.doc.items(c.page);
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      if ((it.t === 'tx' || it.t === 'nt') && hitTest(it, p.x, p.y, 4)) { this.ctl.app.editText(c.page, it); return; }
+      if ((it.t === 'tx' || it.t === 'nt' || it.t === 'cl' || it.t === 'tb') && hitTest(it, p.x, p.y, 4)) { this.ctl.app.editText(c.page, it, p.x, p.y); return; }
     }
     this.ctl.app.editText(c.page, null, p.x, p.y);
   }

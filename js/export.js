@@ -56,7 +56,7 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     const ordered = [...shown.filter((it) => it.t === 's' && it.tool === 'hl'), ...shown.filter((it) => !(it.t === 's' && it.tool === 'hl'))];
     for (const it of ordered) {
       if (it.t === 'ln') { addLinkAnnot(pdf, pages, page, inv, it); continue; }
-      if (it.t === 'tx' || it.t === 'nt' || it.t === 'im') {
+      if (it.t === 'tx' || it.t === 'nt' || it.t === 'im' || it.t === 'cl' || it.t === 'tb') {
         // 글상자·포스트잇은 그림으로 렌더링(한글 글꼴 문제 없음), 첨부 그림은 원본 그대로
         const placed = it.t === 'im' ? await embedAttachedImage(pdf, it, getBlob) : await renderItemImage(pdf, it);
         if (!placed) continue;

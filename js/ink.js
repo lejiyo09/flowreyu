@@ -11,8 +11,11 @@
 //  image  : {id, t:'im', x, y, w, h, blob}            (blob = IndexedDB blobs 스토어의 id, 이미지 자체는 따로 저장)
 //  note   : {id, t:'nt', x, y, w, h, c(배경), fs, text, fold?} (포스트잇, fold=true 면 작은 아이콘으로 접힘)
 
+//  check  : {id, t:'cl', x, y, w, fs, c, rows:[{text, done}]}          (체크리스트, 높이는 줄 수로 계산)
+//  table  : {id, t:'tb', x, y, w, h, fs, cells:[[text]]}             (표, 행·열은 cells 크기, 첫 행은 머리글)
+
 /** 지우개가 건드리지 않는 "개체" 종류 (설정의 "개체도 지우기"로 허용) */
-export const OBJECT_TYPES = new Set(['tx', 'ln', 'im', 'nt']);
+export const OBJECT_TYPES = new Set(['tx', 'ln', 'im', 'nt', 'cl', 'tb']);
 export const NOTE_COLORS = ['#fff59d', '#ffcc80', '#f8bbd0', '#b3e5fc', '#c5e1a5', '#e1bee7'];
 import { distToSegment, pointInPolygon, uid } from './util.js';
 
@@ -138,6 +141,8 @@ function computeBBox(item) {
     return { x: item.x, y: item.y, w: L.w, h: L.h };
   }
   if (item.t === 'nt' && item.fold) return noteIconRect(item);
+  if (item.t === 'cl') return { x: item.x, y: item.y, w: item.w, h: checkHeight(item) };
+  if (item.t === 'tb') return { x: item.x, y: item.y, w: item.w, h: item.h };
   if (item.t === 'ln' || item.t === 'im' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
@@ -204,6 +209,10 @@ export function drawItem(ctx, item) {
     drawImage(ctx, item);
   } else if (item.t === 'nt') {
     drawNote(ctx, item);
+  } else if (item.t === 'cl') {
+    drawChecklist(ctx, item);
+  } else if (item.t === 'tb') {
+    drawTable(ctx, item);
   } else if (item.t === 'tx') {
     const L = textLayout(item);
     ctx.fillStyle = item.c;
@@ -383,6 +392,128 @@ function drawNote(ctx, item) {
   ctx.restore();
 }
 
+// ── 체크리스트 ──
+const CL_ROW = 1.7; // 줄 높이 = 글자 크기 × 1.7
+const CL_PAD = 4;
+export function checkRowH(it) { return it.fs * CL_ROW; }
+export function checkHeight(it) { return Math.max(1, it.rows.length) * checkRowH(it) + CL_PAD * 2; }
+/** i 번째 줄 체크 상자 영역 */
+export function checkBox(it, i) {
+  const rh = checkRowH(it), s = it.fs * 0.95;
+  return { x: it.x + CL_PAD, y: it.y + CL_PAD + i * rh + (rh - s) / 2, w: s, h: s };
+}
+/** 줄 번호 (영역 밖이면 -1) */
+export function checkRowAt(it, x, y) {
+  if (x < it.x || x > it.x + it.w) return -1;
+  const i = Math.floor((y - it.y - CL_PAD) / checkRowH(it));
+  return i >= 0 && i < it.rows.length ? i : -1;
+}
+
+function drawChecklist(ctx, it) {
+  const rh = checkRowH(it);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(it.x, it.y, it.w, checkHeight(it));
+  ctx.clip();
+  ctx.font = `${it.fs}px ${TEXT_FONT}`;
+  ctx.textBaseline = 'middle';
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  it.rows.forEach((r, i) => {
+    const b = checkBox(it, i);
+    ctx.lineWidth = Math.max(0.8, it.fs * 0.08);
+    ctx.strokeStyle = r.done ? '#2e9d4f' : 'rgba(40,40,40,0.75)';
+    ctx.fillStyle = r.done ? '#2e9d4f' : 'rgba(255,255,255,0.9)';
+    roundRectPath(ctx, b.x, b.y, b.w, b.h, b.w * 0.2);
+    ctx.fill();
+    ctx.stroke();
+    if (r.done) {
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = Math.max(1, it.fs * 0.12);
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.w * 0.22, b.y + b.h * 0.52); ctx.lineTo(b.x + b.w * 0.42, b.y + b.h * 0.72); ctx.lineTo(b.x + b.w * 0.78, b.y + b.h * 0.3);
+      ctx.stroke();
+    }
+    const tx = b.x + b.w + it.fs * 0.5, ty = it.y + CL_PAD + i * rh + rh / 2;
+    ctx.fillStyle = r.done ? 'rgba(60,60,60,0.5)' : it.c;
+    ctx.fillText(r.text, tx, ty);
+    if (r.done && r.text) {
+      const tw = ctx.measureText(r.text).width;
+      ctx.strokeStyle = 'rgba(60,60,60,0.55)';
+      ctx.lineWidth = Math.max(0.6, it.fs * 0.06);
+      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + tw, ty); ctx.stroke();
+    }
+  });
+  ctx.restore();
+}
+
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ── 표 ──
+export function tableSize(it) { return { rows: it.cells.length, cols: it.cells[0]?.length || 0 }; }
+export function cellRect(it, r, c) {
+  const { rows, cols } = tableSize(it);
+  const cw = it.w / cols, ch = it.h / rows;
+  return { x: it.x + c * cw, y: it.y + r * ch, w: cw, h: ch };
+}
+export function cellAt(it, x, y) {
+  const { rows, cols } = tableSize(it);
+  if (x < it.x || y < it.y || x > it.x + it.w || y > it.y + it.h) return null;
+  return { r: Math.min(rows - 1, Math.floor((y - it.y) / (it.h / rows))), c: Math.min(cols - 1, Math.floor((x - it.x) / (it.w / cols))) };
+}
+
+function drawTable(ctx, it) {
+  const { rows, cols } = tableSize(it);
+  ctx.save();
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillRect(it.x, it.y, it.w, it.h);
+  ctx.fillStyle = 'rgba(52,120,246,0.10)'; // 첫 행 = 머리글
+  ctx.fillRect(it.x, it.y, it.w, it.h / rows);
+  ctx.strokeStyle = 'rgba(40,50,70,0.7)';
+  ctx.lineWidth = Math.max(0.6, it.fs * 0.06);
+  ctx.beginPath();
+  for (let r = 0; r <= rows; r++) { const y = it.y + (it.h * r) / rows; ctx.moveTo(it.x, y); ctx.lineTo(it.x + it.w, y); }
+  for (let c = 0; c <= cols; c++) { const x = it.x + (it.w * c) / cols; ctx.moveTo(x, it.y); ctx.lineTo(x, it.y + it.h); }
+  ctx.stroke();
+  ctx.fillStyle = '#1c1f24';
+  ctx.textBaseline = 'top';
+  const pad = it.fs * 0.35;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const text = it.cells[r][c];
+    if (!text) continue;
+    const b = cellRect(it, r, c);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
+    ctx.font = `${r === 0 ? 'bold ' : ''}${it.fs}px ${TEXT_FONT}`;
+    const lines = wrapText(ctx, text, b.w - pad * 2);
+    lines.forEach((l, k) => ctx.fillText(l, b.x + pad, b.y + pad + k * it.fs * TEXT_LINE));
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+/** 폭에 맞춰 줄바꿈 (한글은 글자 단위, 공백이 있으면 단어 단위) */
+function wrapText(ctx, text, maxW) {
+  const out = [];
+  for (const para of String(text).split('\n')) {
+    let line = '';
+    for (const ch of [...para]) {
+      if (line && ctx.measureText(line + ch).width > maxW) {
+        const sp = line.lastIndexOf(' ');
+        if (sp > 0 && ch !== ' ') { out.push(line.slice(0, sp)); line = line.slice(sp + 1) + ch; } else { out.push(line); line = ch === ' ' ? '' : ch; }
+      } else line += ch;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
 export function linkLabel(item) {
   if (item.to?.url) { try { return '🔗 ' + new URL(item.to.url).hostname; } catch { return '🔗 ' + item.to.url; } }
   if (Number.isInteger(item.to?.page)) return `→ ${item.to.page + 1}쪽`;
@@ -545,7 +676,8 @@ export function transformItem(item, m) {
   if (item.t === 'sh') return { ...item, x1: X(item.x1), y1: Y(item.y1), x2: X(item.x2), y2: Y(item.y2), w: item.w * s };
   if (item.t === 'tx') return { ...item, x: X(item.x), y: Y(item.y), fs: item.fs * s };
   if (item.t === 'ln' || item.t === 'im') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s };
-  if (item.t === 'nt') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s, fs: item.fs * s };
+  if (item.t === 'nt' || item.t === 'tb') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s, fs: item.fs * s };
+  if (item.t === 'cl') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, fs: item.fs * s };
   return item;
 }
 
@@ -579,6 +711,18 @@ export function sanitizeItem(raw) {
   if (raw.t === 'nt') {
     if (![raw.x, raw.y, raw.w, raw.h, raw.fs].every(fin) || raw.w <= 0 || raw.h <= 0) return null;
     return { id, t: 'nt', x: raw.x, y: raw.y, w: raw.w, h: raw.h, c, fs: raw.fs, text: typeof raw.text === 'string' ? raw.text : '', ...(raw.fold ? { fold: true } : {}) };
+  }
+  if (raw.t === 'cl') {
+    if (![raw.x, raw.y, raw.w, raw.fs].every(fin) || raw.w <= 0 || !Array.isArray(raw.rows)) return null;
+    const rows = raw.rows.filter((r) => r && typeof r.text === 'string').map((r) => ({ text: r.text, done: !!r.done }));
+    if (!rows.length) return null;
+    return { id, t: 'cl', x: raw.x, y: raw.y, w: raw.w, fs: raw.fs, c, rows };
+  }
+  if (raw.t === 'tb') {
+    if (![raw.x, raw.y, raw.w, raw.h, raw.fs].every(fin) || raw.w <= 0 || raw.h <= 0 || !Array.isArray(raw.cells) || !raw.cells.length) return null;
+    const cols = Array.isArray(raw.cells[0]) ? raw.cells[0].length : 0;
+    if (!cols || !raw.cells.every((r) => Array.isArray(r) && r.length === cols)) return null;
+    return { id, t: 'tb', x: raw.x, y: raw.y, w: raw.w, h: raw.h, fs: raw.fs, cells: raw.cells.map((r) => r.map((v) => (typeof v === 'string' ? v : ''))) };
   }
   if (raw.t === 'ln') {
     if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0) return null;

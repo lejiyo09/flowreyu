@@ -9,7 +9,7 @@ import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -70,7 +70,7 @@ const app = {
     selectTool(toolBeforeEraser || 'pen');
   },
   tap: (sx, sy) => followLinkAt(sx, sy),
-  foldAt: (page, x, y) => foldAt(page, x, y),
+  tapObjectAt: (page, x, y) => tapObjectAt(page, x, y),
   noteDragStart: (sx, sy) => noteDragStart(sx, sy),
   noteDragMove: (sx, sy) => noteDragMove(sx, sy),
   noteDragEnd: (cancel) => noteDragEnd(cancel),
@@ -622,11 +622,25 @@ function setNotesFold(page, ids, fold) {
 
 const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 
-/** (x,y)가 접힌 포스트잇 아이콘이거나 펼친 포스트잇의 접기 버튼이면 토글하고 true */
-function foldAt(page, x, y) {
-  const items = state.doc?.items(page) || [];
+/**
+ * 탭 한 번으로 바뀌는 개체: 접힌 포스트잇 아이콘(펼침), 포스트잇 접기 버튼(접음), 체크리스트 상자(완료 표시).
+ * 해당하면 처리하고 true (펜 탭은 점을 찍지 않고, 손가락 탭은 링크보다 먼저)
+ */
+function tapObjectAt(page, x, y) {
+  const d = state.doc;
+  const items = d?.items(page) || [];
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
+    if (n.t === 'cl') {
+      const r = checkRowAt(n, x, y);
+      if (r < 0) continue;
+      const b = checkBox(n, r), slop = n.fs * 0.35;
+      if (x <= b.x + b.w + slop && y >= b.y - slop && y <= b.y + b.h + slop) {
+        d.setItems(page, items.map((it) => (it.id === n.id ? { ...it, rows: it.rows.map((row, k) => (k === r ? { ...row, done: !row.done } : row)) } : it)));
+        return true;
+      }
+      continue;
+    }
     if (n.t !== 'nt') continue;
     if (n.fold && inside(noteIconRect(n), x, y)) { setNotesFold(page, new Set([n.id]), false); return true; }
     if (!n.fold && inside(noteFoldButton(n), x, y)) { setNotesFold(page, new Set([n.id]), true); return true; }
@@ -692,6 +706,40 @@ function insertNote(at) {
   startTextEdit(hit.page, item);
 }
 
+/** 화면 가운데(또는 지정 위치)의 페이지 좌표 */
+function placeAt(at) {
+  return (at && viewer.pageAtScreen(at.x, at.y)) || viewer.pageAtScreen(viewer.vw / 2, viewer.vh / 2) || { page: viewer.currentPage(), x: 50, y: 50 };
+}
+
+function insertChecklist(at) {
+  const doc = state.doc;
+  if (!doc) return;
+  const hit = placeAt(at), p = viewer.pages[hit.page], z = viewer.cam.z;
+  const w = Math.min(260 / z, p.w * 0.8), fs = 15 / z;
+  const item = { id: uid('cl'), t: 'cl', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - fs * 2, 0, p.h - fs * 3), w, fs, c: '#1c1f24', rows: [{ text: '', done: false }] };
+  doc.add(hit.page, item);
+  startTextEdit(hit.page, item, undefined, undefined, { isNew: true });
+}
+
+function insertTable(rows, cols, at) {
+  const doc = state.doc;
+  if (!doc) return;
+  const hit = placeAt(at), p = viewer.pages[hit.page], z = viewer.cam.z;
+  const fs = 13 / z;
+  const w = Math.min(cols * 110 / z, p.w * 0.9), h = Math.min(rows * fs * 2.2, p.h * 0.8);
+  const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
+  const item = { id: uid('tb'), t: 'tb', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, 0, p.h - h), w, h, fs, cells };
+  doc.add(hit.page, item);
+  startTextEdit(hit.page, item, undefined, undefined, { cell: { r: 0, c: 0 } });
+}
+
+$('#btnChecklist').addEventListener('click', () => insertChecklist());
+$('#btnTable').addEventListener('click', () => $('#tableDlg').showModal());
+$('#tableDlg').addEventListener('close', () => {
+  if ($('#tableDlg').returnValue !== 'ok') return;
+  insertTable(clamp(parseInt($('#tbRows').value, 10) || 3, 1, 30), clamp(parseInt($('#tbCols').value, 10) || 3, 1, 12));
+});
+
 $('#btnImage').addEventListener('click', () => $('#imageInput').click());
 $('#imageInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; insertImageFile(f); });
 $('#btnNote').addEventListener('click', () => insertNote());
@@ -717,7 +765,7 @@ async function followLinkAt(sx, sy) {
   if (!state.doc) return;
   const hit = viewer.pageAtScreen(sx, sy, true);
   if (!hit) return;
-  if (foldAt(hit.page, hit.x, hit.y)) return; // 손가락 탭으로도 포스트잇 접기/펼치기
+  if (tapObjectAt(hit.page, hit.x, hit.y)) return; // 손가락 탭으로도 포스트잇 접기/펼치기·체크
   const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
   const items = state.doc.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
@@ -1065,6 +1113,8 @@ function runAction(action, sx, sy, source) {
     }
     case 'insertImage': $('#imageInput').click(); break;
     case 'insertNote': insertNote({ x: sx, y: sy }); break;
+    case 'insertChecklist': insertChecklist({ x: sx, y: sy }); break;
+    case 'insertTable': $('#tableDlg').showModal(); break;
     case 'toggleFinger': $('#btnFinger').click(); break;
     case 'toggleRuler': $('#btnRuler').click(); break;
     case 'toggleProt': $('#btnProt').click(); break;
@@ -1154,7 +1204,10 @@ function positionOverlays() {
           for (const c of kind === 'note' ? NOTE_COLORS.slice(0, 5) : PEN_COLORS.slice(0, 5)) colors.appendChild(swatch(c, false, () => tools.recolorSelection(c, kind)));
         }
         // 글상자/포스트잇 하나만 선택했으면 "편집" 버튼
-        menu.querySelector('[data-sel=edit]').hidden = !(selItems.filter((i) => i.t === 'tx' || i.t === 'nt').length === 1 && !selItems.some((i) => i.t === 'nt' && i.fold));
+        const editable = selItems.filter((i) => ['tx', 'nt', 'cl', 'tb'].includes(i.t));
+        menu.querySelector('[data-sel=edit]').hidden = !(editable.length === 1 && !selItems.some((i) => i.t === 'nt' && i.fold));
+        const oneTable = selItems.length === 1 && selItems[0].t === 'tb';
+        menu.querySelectorAll('[data-sel^=tb-]').forEach((b) => { b.hidden = !oneTable; });
         const notes = selItems.filter((i) => i.t === 'nt');
         const fb = menu.querySelector('[data-sel=fold]');
         fb.hidden = !notes.length;
@@ -1182,73 +1235,165 @@ $('#selMenu').addEventListener('click', (e) => {
     tools.clearSelection();
     setNotesFold(sel.page, new Set(notes.map((n) => n.id)), fold);
   }
+  if (a?.startsWith('tb-')) {
+    // 표 행·열 추가/삭제 (높이·폭은 칸 크기 유지)
+    const sel = tools.selection;
+    const items = state.doc.items(sel.page);
+    const t = items.find((i) => sel.ids.has(i.id) && i.t === 'tb');
+    if (!t) return;
+    const { rows, cols } = tableSize(t);
+    let cells = t.cells, w = t.w, h = t.h;
+    if (a === 'tb-addRow') { cells = [...cells, Array(cols).fill('')]; h += h / rows; }
+    if (a === 'tb-delRow' && rows > 1) { cells = cells.slice(0, -1); h -= h / rows; }
+    if (a === 'tb-addCol') { cells = cells.map((r) => [...r, '']); w += w / cols; }
+    if (a === 'tb-delCol' && cols > 1) { cells = cells.map((r) => r.slice(0, -1)); w -= w / cols; }
+    state.doc.setItems(sel.page, items.map((i) => (i.id === t.id ? { ...i, cells, w, h } : i)));
+    renderSelection(tools.selection);
+  }
   if (a === 'edit') {
     const sel = tools.selection;
-    const it = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id) && (i.t === 'tx' || i.t === 'nt'));
-    if (it) { tools.clearSelection(); startTextEdit(sel.page, it); }
+    const it = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id) && ['tx', 'nt', 'cl', 'tb'].includes(i.t));
+    if (it) { tools.clearSelection(); startTextEdit(sel.page, it, undefined, undefined, it.t === 'tb' ? { cell: { r: 0, c: 0 } } : {}); }
   }
 });
 
 // ───────────────────────────── 텍스트 편집 ─────────────────────────────
 
 const te = $('#textEditor');
-function startTextEdit(page, item, x, y) {
+/**
+ * 글 편집 상자. kind: text(글상자) | note(포스트잇) | check(체크리스트, 한 줄 = 한 항목) | cell(표의 한 칸)
+ * opts: { cell:{r,c} 표 칸, isNew: 방금 만든 개체(비우면 삭제) }
+ */
+function startTextEdit(page, item, x, y, opts = {}) {
   commitTextEdit();
   const cfg = settings.get('text');
-  state.editing = item
-    ? { page, item, x: item.x, y: item.y, fs: item.fs, c: item.t === 'nt' ? '#2b2b2b' : item.c, note: item.t === 'nt' }
-    : { page, item: null, x, y: y - cfg.size * 0.65, fs: cfg.size, c: cfg.color };
-  te.classList.toggle('note-editor', !!state.editing.note);
-  if (item) { viewer.hidden = new Set([item.id]); viewer.requestInk(); }
-  te.value = item ? item.text : '';
+  let ed;
+  if (!item) ed = { kind: 'text', page, item: null, x, y: y - cfg.size * 0.65, fs: cfg.size, c: cfg.color };
+  else if (item.t === 'nt') ed = { kind: 'note', page, item, fs: item.fs, c: '#2b2b2b' };
+  else if (item.t === 'cl') ed = { kind: 'check', page, item, fs: item.fs, c: item.c, isNew: !!opts.isNew };
+  else if (item.t === 'tb') {
+    const cell = opts.cell || (x != null ? cellAt(item, x, y) : null) || { r: 0, c: 0 };
+    ed = { kind: 'cell', page, item, cell, fs: item.fs, c: '#1c1f24' };
+  } else ed = { kind: 'text', page, item, x: item.x, y: item.y, fs: item.fs, c: item.c };
+  state.editing = ed;
+  te.classList.toggle('note-editor', ed.kind !== 'text');
+  // 편집하는 동안 그 개체(글)는 화면에서 숨기고 입력칸만 보이게 (표·체크리스트는 칸/상자가 보이도록 그대로)
+  if (item && (ed.kind === 'text' || ed.kind === 'note')) { viewer.hidden = new Set([item.id]); viewer.requestInk(); }
+  te.value = ed.kind === 'check' ? item.rows.map((r) => r.text).join('\n')
+    : ed.kind === 'cell' ? item.cells[ed.cell.r][ed.cell.c]
+    : item ? item.text : '';
   te.hidden = false;
   positionTextEditor();
-  // 화면 키보드가 뜨도록 포커스 (펜 탭 직후)
-  setTimeout(() => { te.focus({ preventScroll: true }); te.setSelectionRange(te.value.length, te.value.length); }, 0);
+  // 화면 키보드가 뜨도록 포커스 (펜 탭 직후). 바로 한 번 + 이벤트 처리 뒤 한 번
+  const focusEnd = () => { if (state.editing !== ed) return; te.focus({ preventScroll: true }); te.setSelectionRange(te.value.length, te.value.length); };
+  focusEnd();
+  setTimeout(focusEnd, 0);
 }
+
 function positionTextEditor() {
   const ed = state.editing;
   if (!ed) return;
   const z = viewer.cam.z;
-  const a = viewer.pageToScreen(ed.page, ed.x, ed.y);
-  if (ed.note) {
-    // 포스트잇 안쪽에 맞춘 자동 줄바꿈 입력칸
-    const it = ed.item;
-    Object.assign(te.style, {
+  const base = { fontSize: ed.fs * z + 'px', color: ed.c, fontFamily: TEXT_FONT, lineHeight: TEXT_LINE, background: '' };
+  // 편집 중에도 문서가 바뀔 수 있으니 최신 개체로 위치 계산
+  const it = ed.item && (state.doc?.items(ed.page).find((i) => i.id === ed.item.id) || ed.item);
+  if (ed.kind === 'note') {
+    const a = viewer.pageToScreen(ed.page, it.x, it.y);
+    Object.assign(te.style, base, {
       left: a.x + NOTE_PAD * z + 'px', top: a.y + noteTextTop(it) * z + 'px',
       width: (it.w - NOTE_PAD * 2) * z + 'px', height: (it.h - noteTextTop(it) - NOTE_PAD) * z + 'px',
-      fontSize: ed.fs * z + 'px', lineHeight: TEXT_LINE, color: ed.c, fontFamily: TEXT_FONT,
     });
     return;
   }
+  if (ed.kind === 'check') {
+    // 체크 상자 오른쪽에 줄 높이를 맞춘 입력칸 (줄 = 항목)
+    const b = checkBox(it, 0), rh = checkRowH(it);
+    const left = b.x + b.w + it.fs * 0.5;
+    const lines = Math.max(1, te.value.split('\n').length);
+    const a = viewer.pageToScreen(ed.page, left, it.y + 4);
+    Object.assign(te.style, base, {
+      left: a.x + 'px', top: a.y + 'px', lineHeight: String(rh / it.fs), whiteSpace: 'pre', background: 'rgba(255,255,255,0.85)',
+      width: (it.x + it.w - left) * z + 'px', height: lines * rh * z + 4 + 'px',
+    });
+    return;
+  }
+  if (ed.kind === 'cell') {
+    const r = cellRect(it, ed.cell.r, ed.cell.c);
+    const a = viewer.pageToScreen(ed.page, r.x, r.y);
+    const pad = it.fs * 0.35;
+    Object.assign(te.style, base, {
+      left: a.x + 'px', top: a.y + 'px', padding: pad * z + 'px', background: 'rgba(255,255,255,0.95)',
+      width: r.w * z + 'px', height: r.h * z + 'px', fontWeight: ed.cell.r === 0 ? 'bold' : 'normal',
+    });
+    return;
+  }
+  const a = viewer.pageToScreen(ed.page, ed.x, ed.y);
   const L = textLayout({ text: te.value || ' ', fs: ed.fs });
-  Object.assign(te.style, {
-    left: a.x - 2 + 'px', top: a.y - 2 + 'px',
-    fontSize: ed.fs * z + 'px', color: ed.c, fontFamily: TEXT_FONT,
+  Object.assign(te.style, base, {
+    left: a.x - 2 + 'px', top: a.y - 2 + 'px', padding: '0', fontWeight: 'normal', whiteSpace: '',
     width: Math.max(L.w * z + ed.fs * z * 1.5, 60) + 'px', height: L.h * z + 4 + 'px',
   });
 }
 te.addEventListener('input', positionTextEditor);
-te.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== te) commitTextEdit(); }, 0));
-function commitTextEdit() {
+// 다른 곳을 누르면 확정. 단, 그사이 다른 편집(표의 다음 칸 등)이 시작됐으면 그것은 건드리지 않는다
+te.addEventListener('blur', () => {
+  const ed = state.editing;
+  setTimeout(() => { if (ed && state.editing === ed && document.activeElement !== te) commitTextEdit(); }, 0);
+});
+// 표: Tab / Shift+Tab 으로 다음·이전 칸
+te.addEventListener('keydown', (e) => {
+  const ed = state.editing;
+  if (e.key !== 'Tab' || ed?.kind !== 'cell') return;
+  e.preventDefault();
+  const { rows, cols } = tableSize(ed.item);
+  let n = ed.cell.r * cols + ed.cell.c + (e.shiftKey ? -1 : 1);
+  n = (n + rows * cols) % (rows * cols);
+  const page = ed.page, id = ed.item.id;
+  commitTextEdit({ keepFocus: true }); // 키보드가 내려갔다 올라오지 않도록 포커스 유지
+  const t = state.doc.items(page).find((i) => i.id === id);
+  if (t) startTextEdit(page, t, undefined, undefined, { cell: { r: Math.floor(n / cols), c: n % cols } });
+});
+
+function commitTextEdit({ keepFocus = false } = {}) {
   const ed = state.editing;
   if (!ed) return;
   state.editing = null;
   te.hidden = true;
+  te.style.padding = '0';
+  te.style.whiteSpace = '';
+  te.style.fontWeight = 'normal';
   viewer.hidden = null;
   const doc = state.doc;
-  const text = te.value.replace(/\s+$/, '');
+  const raw = te.value;
+  const text = raw.replace(/\s+$/, '');
   te.value = '';
-  te.blur();
+  if (!keepFocus) te.blur();
   if (!doc) return;
   const items = doc.items(ed.page);
-  if (ed.note) {
+  const cur = ed.item && items.find((i) => i.id === ed.item.id);
+  const replace = (fn) => doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? fn(i) : i)));
+  if (ed.kind === 'note') {
     // 포스트잇은 글이 비어도 남겨 둔다 (펜으로 쓰는 메모지로도 사용)
-    const cur = items.find((i) => i.id === ed.item.id);
-    if (cur && cur.text !== text) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, text } : i)));
+    if (cur && cur.text !== text) replace((i) => ({ ...i, text }));
+  } else if (ed.kind === 'check') {
+    if (!cur) return;
+    const lines = raw.split('\n').map((l) => l.replace(/\s+$/, ''));
+    while (lines.length > 1 && !lines[lines.length - 1]) lines.pop();
+    if (!lines.some((l) => l)) { doc.setItems(ed.page, items.filter((i) => i.id !== cur.id)); return; } // 다 비우면 삭제
+    // 완료 표시는 같은 글의 항목을 따라간다 (줄 순서를 바꿔도 유지)
+    const pool = [...cur.rows];
+    const rows = lines.map((l) => {
+      const j = pool.findIndex((r) => r.text === l);
+      return { text: l, done: j >= 0 ? pool.splice(j, 1)[0].done : false }; // 새로 쓰거나 고친 항목은 미완료
+    });
+    if (JSON.stringify(rows) !== JSON.stringify(cur.rows)) replace((i) => ({ ...i, rows }));
+  } else if (ed.kind === 'cell') {
+    if (!cur) return;
+    const { r, c } = ed.cell;
+    if (cur.cells[r][c] !== text) replace((i) => ({ ...i, cells: i.cells.map((row, ri) => (ri === r ? row.map((v, ci) => (ci === c ? text : v)) : row)) }));
   } else if (ed.item) {
     if (!text) doc.setItems(ed.page, items.filter((i) => i.id !== ed.item.id));
-    else if (text !== ed.item.text) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, text } : i)));
+    else if (cur && text !== cur.text) replace((i) => ({ ...i, text }));
   } else if (text) {
     doc.add(ed.page, { id: uid('tx'), t: 'tx', x: ed.x, y: ed.y, c: ed.c, fs: ed.fs, text });
   }
