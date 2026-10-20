@@ -8,10 +8,10 @@ import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { AudioRecorder, fmtTime } from './audio.js';
-import { askClaude, AiError, getApiKey, setApiKey, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
+import { askAi, AiError, AI_MODELS, getApiKey, setApiKey, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, tableHandle, tableDeleteButton, tableBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -645,6 +645,16 @@ function tapObjectAt(page, x, y) {
       }
       continue;
     }
+    if (n.t === 'tb') {
+      if (!inside(tableDeleteButton(n), x, y)) continue;
+      commitTextEdit();
+      tools.clearSelection();
+      // 표와 그 위에 쓴 필기를 함께 삭제 (실행 취소 가능)
+      const ids = new Set([n.id, ...noteAttached(items, n)]);
+      d.setItems(page, items.filter((it) => !ids.has(it.id)));
+      toast('표를 삭제했습니다 · 실행 취소로 되돌릴 수 있음');
+      return true;
+    }
     if (n.t !== 'nt') continue;
     if (n.fold && inside(noteIconRect(n), x, y)) { setNotesFold(page, new Set([n.id]), false); return true; }
     if (!n.fold && inside(noteFoldButton(n), x, y)) { setNotesFold(page, new Set([n.id]), true); return true; }
@@ -652,10 +662,10 @@ function tapObjectAt(page, x, y) {
   return false;
 }
 
-// ── 포스트잇 끌어 옮기기: 어두운 띠(또는 접힌 아이콘)를 펜·손가락으로 잡고 끌기 ──
+// ── 포스트잇·표 끌어 옮기기: 어두운 띠(또는 접힌 아이콘)를 펜·손가락으로 잡고 끌기 ──
 let noteDrag = null; // {page, ids, sx0, sy0, m}
 
-/** 화면 점이 포스트잇 손잡이 위면 끌기 시작 (도구와 무관). 시작했으면 {page}, 아니면 false */
+/** 화면 점이 포스트잇·표 손잡이 위면 끌기 시작 (도구와 무관). 시작했으면 {page}, 아니면 false */
 function noteDragStart(sx, sy) {
   if (noteDrag) return false;
   const d = state.doc;
@@ -664,7 +674,8 @@ function noteDragStart(sx, sy) {
   const items = d.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
-    if (n.t !== 'nt' || !inside(noteHandle(n), hit.x, hit.y)) continue;
+    const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' ? tableHandle(n) : null;
+    if (!handle || !inside(handle, hit.x, hit.y)) continue;
     commitTextEdit();
     tools.clearSelection();
     const ids = new Set([n.id, ...noteAttached(items, n)]);
@@ -732,7 +743,8 @@ function insertTable(rows, cols, at) {
   const fs = 13 / z;
   const w = Math.min(cols * 110 / z, p.w * 0.9), h = Math.min(rows * fs * 2.2, p.h * 0.8);
   const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
-  const item = { id: uid('tb'), t: 'tb', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, 0, p.h - h), w, h, fs, cells };
+  const bh = tableBarH({ fs }); // 위쪽 손잡이 띠가 페이지 밖으로 나가지 않게
+  const item = { id: uid('tb'), t: 'tb', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, bh, Math.max(bh, p.h - h)), w, h, fs, cells };
   doc.add(hit.page, item);
   startTextEdit(hit.page, item, undefined, undefined, { cell: { r: 0, c: 0 } });
 }
@@ -1103,12 +1115,20 @@ async function runAi() {
       Object.assign(job, { page, pieces });
       req = kind === 'grammar' ? grammarRequest(pieces.map((p) => p.text)) : translateRequest(pieces.map((p) => p.text), $('#aiLang').value);
     }
-    aiShow('생각하는 중…');
-    const res = await askClaude({
+    // 무료 키는 응답이 수십 초 걸리기도 하므로 기다린 시간을 보여 준다
+    const t0 = Date.now();
+    let streamed = false;
+    const tick = () => { if (aiJob === job && !streamed) aiShow(`생각하는 중… ${Math.round((Date.now() - t0) / 1000)}초`); };
+    tick();
+    job.timer = setInterval(tick, 1000);
+    // 맞춤법·번역은 단순한 작업이라 한 단계 낮은 생각 깊이로 (속도·사용량 절약)
+    const effort = settings.get('ai').effort;
+    const res = await askAi({
       ...req,
-      effort: settings.get('ai').effort,
+      model: settings.get('ai').model,
+      effort: kind === 'minutes' ? effort : (effort === 'high' ? 'medium' : 'low'),
       signal: job.ctrl.signal,
-      onText: (_d, all) => { if (aiJob === job) aiShow(all); },
+      onText: (_d, all) => { streamed = true; if (aiJob === job) aiShow(all); },
     });
     if (aiJob !== job) return;
     job.text = res.text;
@@ -1129,6 +1149,7 @@ async function runAi() {
   } catch (e) {
     if (aiJob === job) aiShow(e.message || String(e), { error: true });
   } finally {
+    clearInterval(job.timer);
     job.running = false;
     if (aiJob === job) { $('#aiRun').disabled = false; $('#aiStop').hidden = true; }
   }
@@ -1863,6 +1884,8 @@ function openSettings() {
 }
 $('#setAiKey').addEventListener('change', (e) => { setApiKey(e.target.value); $('#aiNoKey').hidden = !!getApiKey(); });
 $('#btnAiKeyClear').addEventListener('click', () => { setApiKey(''); $('#setAiKey').value = ''; toast('API 키를 지웠습니다'); });
+for (const [id, name, hint] of AI_MODELS) $('#setAiModel').insertAdjacentHTML('beforeend', `<option value="${id}" title="${escapeHtml(hint)}">${escapeHtml(name)}</option>`);
+$('#setAiModel').addEventListener('change', (e) => settings.set('ai', { ...settings.get('ai'), model: e.target.value }));
 $('#setAiEffort').addEventListener('change', (e) => settings.set('ai', { ...settings.get('ai'), effort: e.target.value }));
 $('#setEraserReturn').addEventListener('change', (e) => settings.set('eraser', { ...settings.get('eraser'), autoReturn: e.target.checked }));
 
@@ -1881,6 +1904,7 @@ function syncSettingsForm() {
   $('#setEraserReturn').checked = !!settings.get('eraser').autoReturn;
   $('#setAiKey').value = getApiKey();
   $('#setAiEffort').value = settings.get('ai').effort;
+  $('#setAiModel').value = settings.get('ai').model;
   for (const el of dlg.querySelectorAll('[data-setting]')) {
     const k = el.dataset.setting, v = settings.get(k);
     if (el.classList.contains('seg')) el.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.value === v));

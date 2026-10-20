@@ -109,6 +109,60 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnExport')]);
   await dl.saveAs(h.S + '/checktable.pdf');
   check('export with checklist & table', true);
+
+  // ── 표 손잡이 띠: 끌어 옮기기(펜·손가락), × 탭으로 삭제 ──
+  await page.click('#toolbar [data-tool=pen]');
+  await page.waitForTimeout(400);
+  tb = await find('tb');
+  const barH = (it) => Math.max(12, Math.min(22, it.fs * 1.6));
+  // 표 위에 펜으로 한 획 (같이 움직여야 함)
+  const a0 = await S(tb.p, tb.it.x + tb.it.w * 0.3, tb.it.y + tb.it.h * 0.6), a1 = await S(tb.p, tb.it.x + tb.it.w * 0.6, tb.it.y + tb.it.h * 0.6);
+  await h.pen(cdp, h.line(X(a0.x), Y(a0.y), X(a1.x), Y(a1.y), 8));
+  await page.waitForTimeout(150);
+  const inkOn = () => page.evaluate(([p]) => __flexnote.state.doc.items(p).filter((i) => i.t === 's').at(-1), [tb.p]);
+  const ink0 = await inkOn();
+  const s0n = await strokes();
+  const bar = async (it, fx) => S(tb.p, it.x + it.w * fx, it.y - barH(it) / 2);
+  let g0 = await bar(tb.it, 0.3);
+  await h.pen(cdp, h.line(X(g0.x), Y(g0.y), X(g0.x + 60), Y(g0.y + 40), 10));
+  await page.waitForTimeout(200);
+  let tb2 = await find('tb');
+  const z = await page.evaluate(() => __flexnote.viewer.cam.z);
+  const ink1 = await page.evaluate(([p, id]) => __flexnote.state.doc.items(p).find((i) => i.id === id), [tb.p, ink0.id]);
+  check('pen drag on table bar moves table (no stroke drawn)', Math.abs(tb2.it.x - tb.it.x - 60 / z) < 2 && Math.abs(tb2.it.y - tb.it.y - 40 / z) < 2 && (await strokes()) === s0n, `${tb.it.x}->${tb2.it.x}`);
+  check('ink written on table moves with it', ink1 && Math.abs(ink1.pts[0] - ink0.pts[0] - 60 / z) < 2);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(150);
+  check('undo restores table position', Math.abs((await find('tb')).it.x - tb.it.x) < 0.01);
+  // 손가락으로 끌기
+  await page.waitForTimeout(400);
+  g0 = await bar(tb.it, 0.4);
+  await h.touch(cdp, 'touchStart', [[X(g0.x), Y(g0.y), 1]]);
+  for (let i = 1; i <= 8; i++) { await h.touch(cdp, 'touchMove', [[X(g0.x - i * 5), Y(g0.y + i * 4), 1]]); await page.waitForTimeout(16); }
+  await h.touch(cdp, 'touchEnd', [[X(g0.x - 40), Y(g0.y + 32), 1]]);
+  await page.waitForTimeout(200);
+  tb2 = await find('tb');
+  check('finger drag on table bar moves table (no pan)', Math.abs(tb2.it.x - tb.it.x + 40 / z) < 2 && Math.abs(tb2.it.y - tb.it.y - 32 / z) < 2, `${tb2.it.x - tb.it.x}`);
+  // × 펜 탭 → 삭제 (점 안 찍힘), 실행 취소로 복구
+  await page.waitForTimeout(400);
+  const delPt = async (it) => { const bh = barH(it), s = Math.min(bh * 1.3, it.w * 0.3); return S(tb.p, it.x + it.w - s / 2, it.y - bh / 2); };
+  let dp = await delPt(tb2.it);
+  const s1n = await strokes();
+  await h.pen(cdp, [[X(dp.x), Y(dp.y), 0.5]]);
+  await page.waitForTimeout(200);
+  check('pen tap on × deletes table + its ink, no dot', !(await find('tb')) && (await strokes()) === s1n - 1, String(await strokes()));
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(200);
+  check('undo brings table back', !!(await find('tb')) && (await strokes()) === s1n);
+  // 손가락 탭으로도 삭제
+  await page.waitForTimeout(400);
+  dp = await delPt((await find('tb')).it);
+  await h.touch(cdp, 'touchStart', [[X(dp.x), Y(dp.y), 1]]);
+  await h.touch(cdp, 'touchEnd', [[X(dp.x), Y(dp.y), 1]]);
+  await page.waitForTimeout(200);
+  check('finger tap on × deletes table', !(await find('tb')));
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(200);
   await page.screenshot({ path: h.S + '/checktable.png' });
   console.log(results.join('\n'));
   const errs = logs.filter((l) => /pageerror|\[error\]/.test(l));

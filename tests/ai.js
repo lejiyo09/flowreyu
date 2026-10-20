@@ -1,42 +1,43 @@
-// AI 도우미 테스트: api.anthropic.com 을 가짜 응답(SSE)으로 바꿔서 요청 형식·결과 반영·오류 처리를 검사
+// AI 도우미 테스트: Gemini API(generativelanguage.googleapis.com)를 가짜 응답(SSE)으로 바꿔서 요청 형식·결과 반영·오류 처리를 검사
 const h = require('./harness');
 const results = [];
 const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${name} ${info}`);
 
-function sse(text, { stop = 'end_turn', model = 'claude-opus-5-5' } = {}) {
-  const ev = (type, data) => `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+function sse(text, { finish = 'STOP', model = 'gemini-3.8-flash' } = {}) {
   const chunks = text.match(/[\s\S]{1,7}/g) || [];
-  return ev('message_start', { message: { id: 'msg_t', type: 'message', role: 'assistant', model, content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 0 } } })
-    + ev('content_block_start', { index: 0, content_block: { type: 'text', text: '' } })
-    + chunks.map((c) => ev('content_block_delta', { index: 0, delta: { type: 'text_delta', text: c } })).join('')
-    + ev('content_block_stop', { index: 0 })
-    + ev('message_delta', { delta: { stop_reason: stop, stop_sequence: null }, usage: { output_tokens: 20 } })
-    + ev('message_stop', {});
+  const ev = (o) => `data: ${JSON.stringify(o)}\r\n\r\n`;
+  const cand = (t, fin) => ({ candidates: [{ content: { role: 'model', parts: [{ text: t }] }, ...(fin ? { finishReason: fin } : {}), index: 0 }], modelVersion: model });
+  return ev({ candidates: [{ content: { role: 'model', parts: [{ text: '생각 중', thought: true }] }, index: 0 }], modelVersion: model })
+    + chunks.map((c, i) => ev(cand(c, i === chunks.length - 1 ? finish : null))).join('')
+    + (chunks.length ? '' : ev(cand('', finish)));
 }
 
 (async () => {
   const { browser, context, page, logs } = await h.launch();
   const reqs = [];
   let mode = 'ok';
-  await context.route('https://api.anthropic.com/**', async (route) => {
+  await context.route('https://generativelanguage.googleapis.com/**', async (route) => {
     const r = route.request();
     const body = JSON.parse(r.postData() || '{}');
     reqs.push({ url: r.url(), headers: r.headers(), body });
-    if (mode === 'auth') return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }) });
+    const json = (status, o) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(o) });
+    if (mode === 'auth') return json(400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.', status: 'INVALID_ARGUMENT', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'API_KEY_INVALID' }] } });
+    if (mode === 'quota') return json(429, { error: { code: 429, message: 'You exceeded your current quota', status: 'RESOURCE_EXHAUSTED', details: [{ violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] }] } });
+    if (mode === 'nothink' && body.generationConfig?.thinkingConfig) return json(400, { error: { code: 400, message: 'Thinking level is not supported for this model.', status: 'INVALID_ARGUMENT' } });
     if (mode === 'slow') await h.sleep(4000);
-    const sys = String(body.system || '');
+    const sys = String(body.systemInstruction?.parts?.[0]?.text || '');
     let out;
-    if (mode === 'refusal') out = sse('', { stop: 'refusal' });
+    if (mode === 'refusal') out = sse('', { finish: 'SAFETY' });
     else if (sys.includes('회의록')) out = sse('■ 제목: 주간 회의\n■ 요약\n- 일정 확인\n■ 할 일\n- [ ] 보고서 작성 (담당: 김)\n- [ ] 회의실 예약\n■ 남은 질문\n- 없음');
     else if (sys.includes('교정자')) out = sse('<<<1>>>\n안녕하세요. 반갑습니다.\n<<<2>>>\n우유 사기\n<<<3>>>\n점수\n<<<설명>>>\n반갑읍니다 → 반갑습니다 (맞춤법)');
     else if (sys.includes('번역가')) out = sse('<<<1>>>\nこんにちは。\n<<<2>>>\n牛乳を買う\n<<<3>>>\n点数');
     else out = sse('?');
-    return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'request-id': 'req_t' }, body: out });
+    return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'access-control-allow-origin': '*' }, body: out });
   });
 
   await page.goto(process.env.APP_URL || 'http://localhost:8080/');
   await page.waitForTimeout(500);
-  await page.evaluate(() => localStorage.removeItem('flexnote.aiKey'));
+  await page.evaluate(() => localStorage.removeItem('flexnote.geminiKey'));
   await page.setInputFiles('#fileInput', h.S + '/sample.pdf');
   await page.waitForSelector('#editor:not([hidden])');
   await page.waitForTimeout(800);
@@ -63,10 +64,11 @@ function sse(text, { stop = 'end_turn', model = 'claude-opus-5-5' } = {}) {
   // 설정에서 키 입력
   await page.click('#aiOpenSettings');
   await page.waitForTimeout(200);
-  await page.fill('#setAiKey', 'sk-ant-test-123');
+  await page.fill('#setAiKey', 'AQ.test-key-123');
   await page.dispatchEvent('#setAiKey', 'change');
-  check('key saved locally', (await page.evaluate(() => localStorage.getItem('flexnote.aiKey'))) === 'sk-ant-test-123');
-  check('key not inside settings JSON', !(await page.evaluate(() => localStorage.getItem('flexnote.settings.v1') || '')).includes('sk-ant'));
+  check('key saved locally', (await page.evaluate(() => localStorage.getItem('flexnote.geminiKey'))) === 'AQ.test-key-123');
+  check('key not inside settings JSON', !(await page.evaluate(() => localStorage.getItem('flexnote.settings.v1') || '')).includes('AQ.test'));
+  check('model select lists Gemini models', (await page.inputValue('#setAiModel')) === 'gemini-flash-latest' && (await page.locator('#setAiModel option').count()) === 3);
   await page.evaluate(() => document.querySelector('#settingsDlg').close());
 
   // 맞춤법 검사
@@ -76,15 +78,13 @@ function sse(text, { stop = 'end_turn', model = 'claude-opus-5-5' } = {}) {
   await page.click('#aiRun');
   await page.waitForSelector('#aiResultActions:not([hidden])', { timeout: 15000 }).catch(() => {});
   const rq = reqs[0];
-  check('request sent with api key header', rq && rq.headers['x-api-key'] === 'sk-ant-test-123', JSON.stringify(rq?.headers['x-api-key']));
-  check('model claude-opus-5-5, streaming', rq?.body.model === 'claude-opus-5-5' && rq?.body.stream === true);
-  check('server-side fallback default + beta header', rq?.body.fallbacks === 'default' && /server-side-fallback-2026-07-01/.test(rq?.headers['anthropic-beta'] || ''), rq?.headers['anthropic-beta']);
-  check('adaptive thinking + effort medium', rq?.body.thinking?.type === 'adaptive' && rq?.body.output_config?.effort === 'medium');
-  check('browser access header', rq?.headers['anthropic-dangerous-direct-browser-access'] === 'true');
-  const sent = rq?.body.messages?.[0]?.content?.[0]?.text || '';
+  check('request sent with api key header (not in URL)', rq && rq.headers['x-goog-api-key'] === 'AQ.test-key-123' && !rq.url.includes('key='), rq?.url);
+  check('flash model, streaming SSE endpoint', /\/models\/gemini-flash-latest:streamGenerateContent\?alt=sse$/.test(rq?.url || ''), rq?.url);
+  check('system instruction + grammar uses low thinking', /교정자/.test(rq?.body.systemInstruction?.parts?.[0]?.text) && rq?.body.generationConfig?.thinkingConfig?.thinkingLevel === 'low');
+  const sent = rq?.body.contents?.[0]?.parts?.[0]?.text || '';
   check('pieces packed in order', sent.includes('<<<1>>>\n안녕 하세요. 반갑읍니다.') && sent.includes('<<<2>>>\n우유 사기') && sent.includes('<<<3>>>\n점수'), JSON.stringify(sent));
   const outTxt = await page.textContent('#aiOut');
-  check('result + explanation shown', outTxt.includes('안녕하세요. 반갑습니다.') && outTxt.includes('맞춤법') && !outTxt.includes('<<<'), JSON.stringify(outTxt));
+  check('result + explanation shown (thought parts hidden)', outTxt.includes('안녕하세요. 반갑습니다.') && outTxt.includes('맞춤법') && !outTxt.includes('<<<') && !outTxt.includes('생각 중'), JSON.stringify(outTxt));
   await page.click('#aiApply');
   await page.waitForTimeout(200);
   const nt = await page.evaluate(() => __flexnote.state.doc.items(0).find((i) => i.id === 'nt_a').text);
@@ -99,7 +99,7 @@ function sse(text, { stop = 'end_turn', model = 'claude-opus-5-5' } = {}) {
   await page.selectOption('#aiLang', 'ja');
   await page.click('#aiRun');
   await page.waitForFunction(() => document.querySelector('#aiOut').textContent.includes('こんにちは'), null, { timeout: 15000 }).catch(() => {});
-  check('translate prompt names target language', String(reqs[1]?.body.system).includes('일본어'));
+  check('translate prompt names target language', String(reqs[1]?.body.systemInstruction?.parts?.[0]?.text).includes('일본어'));
   await page.click('#aiApply');
   await page.waitForTimeout(150);
   const tb = await page.evaluate(() => __flexnote.state.doc.items(0).find((i) => i.id === 'tb_a').cells);
@@ -115,8 +115,9 @@ function sse(text, { stop = 'end_turn', model = 'claude-opus-5-5' } = {}) {
   check('recording with transcript preselected', (await page.inputValue('#aiRec')) === 'rec_t');
   await page.click('#aiRun');
   await page.waitForSelector('#aiTodos:not([hidden])', { timeout: 15000 }).catch(() => {});
-  const mc = reqs[2]?.body.messages?.[0]?.content || [];
-  check('minutes sends page image (jpeg) + page text', mc[0]?.type === 'image' && mc[0]?.source?.media_type === 'image/jpeg' && mc[0]?.source?.data?.length > 1000 && mc[1]?.text.includes('<페이지_글>') && mc[1]?.text.includes('[1:02] 보고서는 김 대리가 작성'), JSON.stringify(mc.map((c) => c.type)));
+  const mc = reqs[2]?.body.contents?.[0]?.parts || [];
+  check('minutes uses effort setting (medium)', reqs[2]?.body.generationConfig?.thinkingConfig?.thinkingLevel === 'medium');
+  check('minutes sends page image (jpeg) + page text + transcript', mc[0]?.inlineData?.mimeType === 'image/jpeg' && mc[0]?.inlineData?.data?.length > 1000 && mc[1]?.text.includes('<페이지_글>') && mc[1]?.text.includes('[1:02] 보고서는 김 대리가 작성'), JSON.stringify(mc.map((c) => Object.keys(c))));
   const before = await page.evaluate(() => __flexnote.state.doc.items(0).length);
   await page.click('#aiTodos');
   await page.waitForTimeout(150);
@@ -135,22 +136,33 @@ function sse(text, { stop = 'end_turn', model = 'claude-opus-5-5' } = {}) {
   mode = 'refusal';
   await page.click('#aiRun');
   await page.waitForFunction(() => document.querySelector('#aiOut').textContent.includes('거절'), null, { timeout: 15000 }).catch(() => {});
-  check('refusal stop_reason handled', (await page.textContent('#aiOut')).includes('거절'));
+  check('safety block handled', (await page.textContent('#aiOut')).includes('거절'));
+  mode = 'quota';
+  await page.click('#aiRun');
+  await page.waitForFunction(() => document.querySelector('#aiOut').textContent.includes('한도'), null, { timeout: 15000 }).catch(() => {});
+  check('free-tier 429 → quota message', (await page.textContent('#aiOut')).includes('무료 사용량 한도'), await page.textContent('#aiOut'));
+  mode = 'nothink';
+  const n0 = reqs.length;
+  await page.click('#aiTabs button[value=grammar]');
+  await page.click('#aiRun');
+  await page.waitForSelector('#aiResultActions:not([hidden])', { timeout: 15000 }).catch(() => {});
+  check('retries without thinkingConfig when unsupported', reqs.length === n0 + 2 && !reqs.at(-1).body.generationConfig.thinkingConfig && (await page.textContent('#aiOut')).includes('반갑습니다'));
+  await page.click('#aiTabs button[value=minutes]');
   mode = 'slow';
   await page.click('#aiRun');
-  await page.waitForTimeout(500);
-  check('stop button visible while running', await page.locator('#aiStop').isVisible());
+  await page.waitForTimeout(1600);
+  check('stop button + elapsed seconds while waiting', await page.locator('#aiStop').isVisible() && /생각하는 중… [12]초/.test(await page.textContent('#aiOut')), await page.textContent('#aiOut'));
   await page.click('#aiStop');
   await page.waitForFunction(() => document.querySelector('#aiOut').textContent.includes('중지'), null, { timeout: 8000 }).catch(() => {});
   check('stop aborts request', (await page.textContent('#aiOut')).includes('중지') && !(await page.locator('#aiRun').isDisabled()));
 
   // 설정 → 생각 깊이
-  await page.evaluate(() => __flexnote.settings.set('ai', { ...__flexnote.settings.get('ai'), effort: 'high' }));
+  await page.evaluate(() => __flexnote.settings.set('ai', { ...__flexnote.settings.get('ai'), effort: 'high', model: 'gemini-pro-latest' }));
   mode = 'ok';
   await page.click('#aiTabs button[value=grammar]');
   await page.click('#aiRun');
   await page.waitForSelector('#aiResultActions:not([hidden])', { timeout: 15000 }).catch(() => {});
-  check('effort setting applied', reqs.at(-1)?.body.output_config?.effort === 'high');
+  check('model setting applied; high → grammar medium', reqs.at(-1)?.body.generationConfig?.thinkingConfig?.thinkingLevel === 'medium' && reqs.at(-1)?.url.includes('/gemini-pro-latest:'));
 
   const errs = logs.filter((l) => l.startsWith('[pageerror]'));
   check('no page errors', !errs.length, errs.join('\n'));

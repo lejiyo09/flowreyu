@@ -94,7 +94,7 @@ function addLinkAnnot(pdf, pages, page, inv, it) {
 
 /** 글상자/포스트잇을 고해상도 PNG 로 그려 넣는다 (포스트잇 그림자 여백 포함) */
 async function renderItemImage(pdf, it) {
-  const b = it.t === 'tx' ? (() => { const L = textLayout(it); return { x: it.x, y: it.y, w: L.w, h: L.h }; })() : bbox(it);
+  const b = it.t === 'tx' ? (() => { const L = textLayout(it); return { x: it.x, y: it.y, w: L.w, h: L.h }; })() : it.t === 'tb' ? { x: it.x, y: it.y, w: it.w, h: it.h } : bbox(it);
   const m = it.t === 'nt' ? 8 : 0;
   const box = { x: b.x - m, y: b.y - m, w: b.w + m * 2, h: b.h + m * 2 };
   const scale = 4;
@@ -104,7 +104,7 @@ async function renderItemImage(pdf, it) {
   const ctx = c.getContext('2d');
   ctx.scale(scale, scale);
   ctx.translate(-box.x, -box.y);
-  drawItem(ctx, it);
+  drawItem(ctx, it, { print: true });
   const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
   if (!blob) return null;
   return { img: await pdf.embedPng(await blob.arrayBuffer()), box };

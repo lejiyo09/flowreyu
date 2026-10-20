@@ -142,7 +142,7 @@ function computeBBox(item) {
   }
   if (item.t === 'nt' && item.fold) return noteIconRect(item);
   if (item.t === 'cl') return { x: item.x, y: item.y, w: item.w, h: checkHeight(item) };
-  if (item.t === 'tb') return { x: item.x, y: item.y, w: item.w, h: item.h };
+  if (item.t === 'tb') { const bh = tableBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
   if (item.t === 'ln' || item.t === 'im' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
@@ -194,7 +194,8 @@ export function strokeRunPaths(ctx, runs, color) {
 }
 
 /** ctx는 이미 페이지 좌표계로 변환되어 있어야 한다 */
-export function drawItem(ctx, item) {
+/** opts.print: PDF 내보내기용 (화면 전용 손잡이는 그리지 않음) */
+export function drawItem(ctx, item, opts) {
   if (item.t === 's') {
     strokeRunPaths(ctx, itemPath(item), item.c);
   } else if (item.t === 'sh') {
@@ -212,7 +213,7 @@ export function drawItem(ctx, item) {
   } else if (item.t === 'cl') {
     drawChecklist(ctx, item);
   } else if (item.t === 'tb') {
-    drawTable(ctx, item);
+    drawTable(ctx, item, opts);
   } else if (item.t === 'tx') {
     const L = textLayout(item);
     ctx.fillStyle = item.c;
@@ -456,6 +457,13 @@ function roundRectPath(ctx, x, y, w, h, r) {
 }
 
 // ── 표 ──
+// 표 위쪽 바깥에 붙은 어두운 손잡이 띠: 잡고 끌면 이동, 오른쪽 끝 × 를 탭하면 삭제 (포스트잇 띠와 같은 방식)
+export function tableBarH(it) { return Math.max(12, Math.min(22, it.fs * 1.6)); }
+export function tableBar(it) { const h = tableBarH(it); return { x: it.x, y: it.y - h, w: it.w, h }; }
+/** 삭제(×) 버튼: 띠 오른쪽 끝 정사각형 */
+export function tableDeleteButton(it) { const b = tableBar(it), s = Math.min(b.h * 1.3, it.w * 0.3); return { x: b.x + b.w - s, y: b.y, w: s, h: b.h }; }
+/** 끌어 옮기는 손잡이: 띠에서 삭제 버튼을 뺀 부분 */
+export function tableHandle(it) { const b = tableBar(it); return { ...b, w: b.w - tableDeleteButton(it).w }; }
 export function tableSize(it) { return { rows: it.cells.length, cols: it.cells[0]?.length || 0 }; }
 export function cellRect(it, r, c) {
   const { rows, cols } = tableSize(it);
@@ -468,8 +476,34 @@ export function cellAt(it, x, y) {
   return { r: Math.min(rows - 1, Math.floor((y - it.y) / (it.h / rows))), c: Math.min(cols - 1, Math.floor((x - it.x) / (it.w / cols))) };
 }
 
-function drawTable(ctx, it) {
+function drawTableBar(ctx, it) {
+  const b = tableBar(it), del = tableDeleteButton(it), r = Math.min(b.h * 0.35, 6);
+  ctx.save();
+  ctx.fillStyle = 'rgba(55,65,85,0.88)';
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y + b.h); ctx.lineTo(b.x, b.y + r); ctx.arcTo(b.x, b.y, b.x + r, b.y, r);
+  ctx.lineTo(b.x + b.w - r, b.y); ctx.arcTo(b.x + b.w, b.y, b.x + b.w, b.y + r, r); ctx.lineTo(b.x + b.w, b.y + b.h);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+  ctx.lineWidth = Math.max(0.8, b.h * 0.09);
+  ctx.lineCap = 'round';
+  // 잡는 곳 표시 (가운데 줄 3개)
+  const gx = b.x + (b.w - del.w) / 2, gw = Math.min(b.h * 1.2, (b.w - del.w) * 0.4);
+  ctx.beginPath();
+  for (const k of [-1, 0, 1]) { const y = b.y + b.h / 2 + k * b.h * 0.2; ctx.moveTo(gx - gw / 2, y); ctx.lineTo(gx + gw / 2, y); }
+  ctx.stroke();
+  // 삭제 ×
+  const cx = del.x + del.w / 2, cy = del.y + del.h / 2, s = b.h * 0.22;
+  ctx.beginPath(); ctx.moveTo(cx - s, cy - s); ctx.lineTo(cx + s, cy + s); ctx.moveTo(cx + s, cy - s); ctx.lineTo(cx - s, cy + s); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = Math.max(0.5, b.h * 0.05);
+  ctx.beginPath(); ctx.moveTo(del.x, b.y + b.h * 0.2); ctx.lineTo(del.x, b.y + b.h * 0.8); ctx.stroke();
+  ctx.restore();
+}
+
+function drawTable(ctx, it, opts) {
   const { rows, cols } = tableSize(it);
+  if (!opts?.print) drawTableBar(ctx, it);
   ctx.save();
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fillRect(it.x, it.y, it.w, it.h);

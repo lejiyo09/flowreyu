@@ -1,13 +1,19 @@
-// AI 도우미 (Claude API): 회의록 정리·요약, 맞춤법·문법 검사, 번역
+// AI 도우미 (Google Gemini API): 회의록 정리·요약, 맞춤법·문법 검사, 번역
 //
-// - 사용자가 직접 발급한 Anthropic API 키를 이 기기(localStorage)에만 저장하고, 브라우저에서 api.anthropic.com 으로 바로 보낸다.
-//   서버를 거치지 않으므로 키가 이 기기 밖으로 나가는 곳은 Anthropic 뿐이다. (공용 기기에서는 쓰지 말 것)
-// - 공식 SDK(@anthropic-ai/sdk)를 vendor/anthropic/sdk.mjs 로 번들해 두었다. 처음 쓸 때만 불러온다.
-// - 정책상 거절되면 서버가 자동으로 다른 모델로 다시 시도한다 (fallbacks: "default").
+// - 사용자가 직접 발급한 Gemini API 키(aistudio.google.com)를 이 기기(localStorage)에만 저장하고,
+//   브라우저에서 generativelanguage.googleapis.com 으로 바로 보낸다. 서버를 거치지 않는다. (공용 기기에서는 쓰지 말 것)
+// - 키를 코드·저장소에 넣지 말 것: GitHub Pages 로 공개되면 누구나 가져다 쓴다.
+// - 모델은 버전 없는 별칭(gemini-flash-latest 등)을 써서 구버전 종료에 영향받지 않게 한다.
 
-export const AI_MODEL = 'claude-opus-5-5';
-const KEY_STORE = 'flexnote.aiKey';
-const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+const API = 'https://generativelanguage.googleapis.com/v1beta/models';
+const KEY_STORE = 'flexnote.geminiKey';
+
+/** [id, 이름, 설명] */
+export const AI_MODELS = [
+  ['gemini-flash-latest', 'Gemini Flash (권장)', '무료 키로 사용 가능'],
+  ['gemini-flash-lite-latest', 'Gemini Flash-Lite', '가장 빠르고 저렴, 정확도는 조금 낮음'],
+  ['gemini-pro-latest', 'Gemini Pro', '가장 정확. 무료 키는 사용량 0 — 결제 등록한 키 필요'],
+];
 
 export const TRANSLATE_LANGS = [
   ['en', '영어'], ['ko', '한국어'], ['ja', '일본어'], ['zh-CN', '중국어(간체)'], ['zh-TW', '중국어(번체)'],
@@ -19,66 +25,102 @@ export function getApiKey() {
   try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; }
 }
 export function setApiKey(k) {
-  try { if (k) localStorage.setItem(KEY_STORE, k.trim()); else localStorage.removeItem(KEY_STORE); } catch { /* */ }
-  client = null;
-}
-
-let client = null; // {key, promise}
-async function getClient() {
-  const key = getApiKey();
-  if (!key) throw new AiError('nokey', 'AI 기능을 쓰려면 설정 → AI 도우미에서 Anthropic API 키를 입력하세요.');
-  if (!client || client.key !== key) {
-    client = {
-      key,
-      promise: import('../vendor/anthropic/sdk.mjs').then((m) => new m.default({ apiKey: key, dangerouslyAllowBrowser: true, maxRetries: 2 })),
-    };
-  }
-  return client.promise;
+  try { if (k && k.trim()) localStorage.setItem(KEY_STORE, k.trim()); else localStorage.removeItem(KEY_STORE); } catch { /* */ }
 }
 
 export class AiError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
-function friendlyError(e) {
-  if (e instanceof AiError) return e;
-  const st = e?.status;
-  if (st === 401) return new AiError('auth', 'API 키가 올바르지 않습니다. 설정 → AI 도우미에서 키를 확인하세요.');
-  if (st === 403) return new AiError('perm', '이 API 키로는 이 기능을 쓸 수 없습니다 (권한 없음).');
-  if (st === 429) return new AiError('rate', '요청이 너무 많거나 사용 한도를 넘었습니다. 잠시 후 다시 시도하세요.');
-  if (st === 400) return new AiError('bad', `요청 오류: ${e?.error?.error?.message || e.message}`);
-  if (st >= 500) return new AiError('server', 'Anthropic 서버가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도하세요.');
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return new AiError('offline', 'AI 기능은 인터넷 연결이 필요합니다.');
-  return new AiError('net', `연결 실패: ${e?.message || e}`);
+function httpError(status, body) {
+  const err = body?.error || {};
+  const reason = (err.details || []).map((d) => d.reason).find(Boolean) || '';
+  const msg = err.message || '';
+  if (reason === 'API_KEY_INVALID' || /API key not valid|API_KEY_INVALID/i.test(msg) || status === 401) return new AiError('auth', 'API 키가 올바르지 않습니다. 설정 → AI 도우미에서 키를 확인하세요.');
+  if (status === 403) return new AiError('perm', `이 API 키로는 쓸 수 없습니다 (권한 없음${msg ? `: ${msg}` : ''}).`);
+  if (status === 429) {
+    const free = /free_tier|FreeTier/i.test(JSON.stringify(body || {}));
+    return new AiError('rate', free
+      ? '무료 사용량 한도에 걸렸습니다. 잠시 후 다시 시도하거나, 설정에서 모델을 Gemini Flash 로 바꾸세요 (Pro 는 무료 키로 쓸 수 없음).'
+      : '요청이 너무 많거나 사용 한도를 넘었습니다. 잠시 후 다시 시도하세요.');
+  }
+  if (status === 400) return new AiError('bad', `요청 오류: ${msg || status}`);
+  if (status >= 500) return new AiError('server', 'Gemini 서버가 일시적으로 응답하지 않습니다. 잠시 후 다시 시도하세요.');
+  return new AiError('http', `오류 ${status}: ${msg}`);
 }
 
+/** SSE 응답을 한 줄씩 읽어 JSON 조각마다 onChunk 호출 */
+async function readSse(res, onChunk) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).replace(/\r$/, '');
+      buf = buf.slice(nl + 1);
+      if (line.startsWith('data:')) { const d = line.slice(5).trim(); if (d) onChunk(JSON.parse(d)); }
+    }
+  }
+  const last = buf.trim();
+  if (last.startsWith('data:')) onChunk(JSON.parse(last.slice(5).trim()));
+}
+
+const BLOCKED = new Set(['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'RECITATION', 'IMAGE_SAFETY']);
+
 /**
- * Claude 에 한 번 묻고 답 글을 돌려준다 (스트리밍, onText 로 진행 중인 글 전달)
- * @param {{system:string, content:Array, effort?:string, onText?:(delta:string, all:string)=>void, signal?:AbortSignal}} o
+ * Gemini 에 한 번 묻고 답 글을 돌려준다 (스트리밍, onText 로 진행 중인 글 전달)
+ * @param {{system:string, parts:Array<{text:string}|{image:{mime:string,data:string}}>, model?:string, effort?:'low'|'medium'|'high', onText?:(delta:string, all:string)=>void, signal?:AbortSignal}} o
  */
-export async function askClaude({ system, content, effort = 'medium', onText, signal }) {
+export async function askAi({ system, parts, model = AI_MODELS[0][0], effort = 'medium', onText, signal }) {
+  const key = getApiKey();
+  if (!key) throw new AiError('nokey', 'AI 기능을 쓰려면 설정 → AI 도우미에서 Gemini API 키를 입력하세요.');
+  const body = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: [{ role: 'user', parts: parts.map((p) => (p.image ? { inlineData: { mimeType: p.image.mime, data: p.image.data } } : { text: p.text })) }],
+    generationConfig: { maxOutputTokens: 16000, thinkingConfig: { thinkingLevel: effort } },
+  };
+  const send = () => fetch(`${API}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify(body),
+    signal,
+  });
   try {
-    const c = await getClient();
-    const stream = c.beta.messages.stream({
-      model: AI_MODEL,
-      max_tokens: 16000,
-      betas: [FALLBACK_BETA],
-      fallbacks: 'default',
-      thinking: { type: 'adaptive' },
-      output_config: { effort },
-      system,
-      messages: [{ role: 'user', content }],
-    }, { signal });
-    let all = '';
-    stream.on('text', (d) => { all += d; onText?.(d, all); });
-    const msg = await stream.finalMessage();
-    if (msg.stop_reason === 'refusal') throw new AiError('refusal', 'AI가 이 내용의 처리를 거절했습니다.');
-    const text = msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+    let res = await send();
+    if (res.status === 400) {
+      const b = await res.json().catch(() => null);
+      // 생각 수준을 지원하지 않는 모델이면 그 옵션 없이 다시
+      if (/thinking/i.test(b?.error?.message || '')) { delete body.generationConfig.thinkingConfig; res = await send(); }
+      else throw httpError(400, b);
+    }
+    if (!res.ok) throw httpError(res.status, await res.json().catch(() => null));
+    let all = '', finish = null, blocked = null, served = model;
+    await readSse(res, (d) => {
+      if (d.error) throw httpError(d.error.code || 500, d);
+      if (d.promptFeedback?.blockReason) blocked = d.promptFeedback.blockReason;
+      if (d.modelVersion) served = d.modelVersion;
+      const c = d.candidates?.[0];
+      if (!c) return;
+      for (const p of c.content?.parts || []) {
+        if (p.thought || !p.text) continue;
+        all += p.text;
+        onText?.(p.text, all);
+      }
+      if (c.finishReason) finish = c.finishReason;
+    });
+    if (blocked || BLOCKED.has(finish)) throw new AiError('refusal', 'AI가 이 내용의 처리를 거절했습니다 (안전 필터).');
+    const text = all.trim();
     if (!text) throw new AiError('empty', 'AI가 빈 답을 보냈습니다. 다시 시도하세요.');
-    return { text, truncated: msg.stop_reason === 'max_tokens', model: msg.model };
+    return { text, truncated: finish === 'MAX_TOKENS', model: served };
   } catch (e) {
     if (signal?.aborted) throw new AiError('abort', '중지했습니다.');
-    throw friendlyError(e);
+    if (e instanceof AiError) throw e;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AiError('offline', 'AI 기능은 인터넷 연결이 필요합니다.');
+    throw new AiError('net', `연결 실패: ${e?.message || e}`);
   }
 }
 
@@ -110,16 +152,16 @@ export function minutesRequest({ segments = [], pageText = '', image = null, tit
     '■ 남은 질문',
     '- ...',
   ].join('\n');
-  const content = [];
-  if (image) content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } });
   const parts = [];
-  if (title || date) parts.push(`노트: ${title}${date ? ` (${date})` : ''}`);
-  if (segments.length) parts.push(`<받아쓰기>\n${segments.map((s) => `[${fmtMs(s.t)}] ${s.text}`).join('\n')}\n</받아쓰기>`);
-  if (pageText.trim()) parts.push(`<페이지_글>\n${pageText.trim()}\n</페이지_글>`);
-  if (image) parts.push('위 이미지는 현재 노트 페이지(손글씨 포함)입니다.');
-  parts.push('이 자료로 회의록을 작성해 주세요.');
-  content.push({ type: 'text', text: parts.join('\n\n') });
-  return { system, content };
+  if (image) parts.push({ image: { mime: 'image/jpeg', data: image } });
+  const lines = [];
+  if (title || date) lines.push(`노트: ${title}${date ? ` (${date})` : ''}`);
+  if (segments.length) lines.push(`<받아쓰기>\n${segments.map((s) => `[${fmtMs(s.t)}] ${s.text}`).join('\n')}\n</받아쓰기>`);
+  if (pageText.trim()) lines.push(`<페이지_글>\n${pageText.trim()}\n</페이지_글>`);
+  if (image) lines.push('위 이미지는 현재 노트 페이지(손글씨 포함)입니다.');
+  lines.push('이 자료로 회의록을 작성해 주세요.');
+  parts.push({ text: lines.join('\n\n') });
+  return { system, parts };
 }
 
 /** 여러 글 조각을 한 번에 보내고 같은 순서로 돌려받기 위한 구분 표시 */
@@ -147,7 +189,7 @@ export function grammarRequest(texts) {
     SEP_RULE(texts.length),
     '모든 조각 뒤에 <<<설명>>> 줄을 쓰고, 그 아래 주요 수정 사항을 "원래 → 고침 (이유)" 형식으로 짧게 나열합니다 (없으면 "고칠 곳 없음").',
   ].join('\n');
-  return { system, content: [{ type: 'text', text: packTexts(texts) }] };
+  return { system, parts: [{ text: packTexts(texts) }] };
 }
 
 /** 번역 */
@@ -157,7 +199,7 @@ export function translateRequest(texts, lang) {
     `당신은 전문 번역가입니다. 각 조각을 자연스러운 ${name}(으)로 번역합니다. 이미 ${name}인 조각은 그대로 둡니다. 고유명사·숫자·URL 은 유지합니다.`,
     SEP_RULE(texts.length),
   ].join('\n');
-  return { system, content: [{ type: 'text', text: packTexts(texts) }] };
+  return { system, parts: [{ text: packTexts(texts) }] };
 }
 
 /** 설명 부분 분리 */

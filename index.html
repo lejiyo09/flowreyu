@@ -207,7 +207,7 @@
       <button class="icon-btn sm" id="aiClose" title="닫기"><svg><use href="#i-close"/></svg></button>
     </div>
     <div class="ai-nokey" id="aiNoKey" hidden>
-      <p class="small" style="margin:0">AI 기능은 본인의 Anthropic API 키가 필요합니다 (사용량만큼 요금 발생, 인터넷 필요).</p>
+      <p class="small" style="margin:0">AI 기능은 본인의 Gemini API 키가 필요합니다 (aistudio.google.com 에서 무료 발급, 인터넷 필요).</p>
       <button class="btn sm primary" id="aiOpenSettings">설정에서 키 입력</button>
     </div>
     <div class="ai-tabs seg" id="aiTabs">
@@ -307,9 +307,10 @@
       </section>
 
       <section>
-        <h3>AI 도우미 (Claude)</h3>
-        <div class="row"><span>Anthropic API 키<small>console.anthropic.com 에서 발급. 이 기기에만 저장되고 Anthropic 으로만 전송됩니다. 공용 기기에서는 입력하지 마세요.</small></span>
-          <span class="btns"><input type="password" id="setAiKey" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" style="width:180px"><button type="button" class="btn sm" id="btnAiKeyClear">지우기</button></span></div>
+        <h3>AI 도우미 (Google Gemini)</h3>
+        <div class="row"><span>Gemini API 키<small>aistudio.google.com → Get API key 에서 발급. 이 기기에만 저장되고 Google 로만 전송됩니다. 공용 기기에서는 입력하지 마세요.</small></span>
+          <span class="btns"><input type="password" id="setAiKey" placeholder="AIza... 또는 AQ...." autocomplete="off" spellcheck="false" style="width:180px"><button type="button" class="btn sm" id="btnAiKeyClear">지우기</button></span></div>
+        <div class="row"><span>모델<small>무료 키는 Flash 계열만 사용 가능</small></span><select id="setAiModel"></select></div>
         <div class="row"><span>생각 깊이<small>높을수록 정확하지만 느리고 비용이 늘어남</small></span>
           <select id="setAiEffort"><option value="low">빠르게</option><option value="medium">보통</option><option value="high">꼼꼼하게</option></select></div>
       </section>
