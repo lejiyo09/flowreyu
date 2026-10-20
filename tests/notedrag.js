@@ -48,7 +48,8 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await h.pen(cdp, h.line(X(body.x), Y(body.y), X(body.x + 60), Y(body.y), 8));
   check('pen on note body writes (does not move)', (await strokes()) === s0 + 1 && (await note()).x === n2.x);
   // 접기 → 접힌 아이콘을 손가락으로 끌어 이동, 탭하면 펼침
-  const fb = await S(n2.x + n2.w - 6, n2.y + 6);
+  const fbr = await page.evaluate((n) => import('./js/ink.js').then((m) => m.noteFoldButton(n)), n2);
+  const fb = await S(fbr.x + fbr.w / 2, fbr.y + fbr.h / 2);
   await h.pen(cdp, [[X(fb.x), Y(fb.y), 0.5]]);
   await page.waitForTimeout(250);
   check('fold button still folds', (await note()).fold === true);

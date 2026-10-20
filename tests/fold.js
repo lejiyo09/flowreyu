@@ -24,7 +24,8 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   check('ink on note visible before folding', (await pix(inkPt))[3] > 200);
   // 펜으로 접기 버튼(오른쪽 위 –) 탭 → 접힘, 점이 찍히지 않음
   const n0 = await note();
-  const fbtn = await S(n0.x + n0.w - 9, n0.y + 9);
+  const fb = await page.evaluate((n) => import('./js/ink.js').then((m) => m.noteFoldButton(n)), n0);
+  const fbtn = await S(fb.x + fb.w / 2, fb.y + fb.h / 2);
   const strokes = () => page.evaluate(() => __flexnote.state.doc.items(0).filter((i) => i.t === 's').length);
   const s0 = await strokes();
   await h.pen(cdp, [[X(fbtn.x), Y(fbtn.y), 0.5]]);
@@ -76,6 +77,32 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#btnExport')]);
   await dl.saveAs(h.S + '/fold-export.pdf');
   check('export with folded note works', true);
+  // 삭제(×) 버튼: 펼친 뒤 펜 탭 → 포스트잇 + 위 필기 삭제, 점 안 찍힘, 실행 취소로 복구
+  await page.click('#toolbar [data-tool=pen]');
+  await page.waitForTimeout(400);
+  let n1 = await note();
+  const ic = await S(n1.x + 10, n1.y + 10);
+  await h.pen(cdp, [[X(ic.x), Y(ic.y), 0.5]]);
+  await page.waitForTimeout(250);
+  n1 = await note();
+  check('unfolded again before delete', n1 && !n1.fold);
+  await page.waitForTimeout(400);
+  const dbx = await page.evaluate((n) => import('./js/ink.js').then((m) => m.noteDeleteButton(n)), n1);
+  const dpt = await S(dbx.x + dbx.w / 2, dbx.y + dbx.h / 2);
+  const sBefore = await strokes();
+  await h.pen(cdp, [[X(dpt.x), Y(dpt.y), 0.5]]);
+  await page.waitForTimeout(250);
+  check('pen tap on "×" deletes note and its ink (no dot)', !(await note()) && (await strokes()) === sBefore - 1, String(await strokes()));
+  await page.click('#btnUndo');
+  await page.waitForTimeout(150);
+  check('undo restores deleted note + ink', !!(await note()) && (await strokes()) === sBefore);
+  // 손가락 탭으로도 삭제
+  await page.waitForTimeout(400);
+  await h.touch(cdp, 'touchStart', [[X(dpt.x), Y(dpt.y), 1]]);
+  await h.touch(cdp, 'touchEnd', [[X(dpt.x), Y(dpt.y), 1]]);
+  await page.waitForTimeout(250);
+  check('finger tap on "×" deletes note', !(await note()));
+  await page.click('#btnUndo');
   console.log(results.join('\n'));
   const errs = logs.filter((l) => /pageerror|\[error\]/.test(l));
   if (errs.length) console.log(errs.join('\n'));

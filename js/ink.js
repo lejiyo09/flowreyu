@@ -271,16 +271,25 @@ export function noteIconRect(n) {
 /** 포스트잇 윗부분(어두운 띠) 높이: 펜·손가락으로 잡고 끌어 옮기는 손잡이 */
 export function noteHeadH(n) { return Math.min(18, n.h * 0.18); }
 
-/** 펼친 포스트잇의 접기(–) 버튼 영역 (어두운 띠의 오른쪽 끝) */
-export function noteFoldButton(n) {
-  const s = Math.max(noteHeadH(n), Math.min(22, n.w * 0.25));
+/** 띠 오른쪽 버튼 한 칸 크기 */
+function noteBtnW(n) { return Math.max(noteHeadH(n), Math.min(22, n.w * 0.2)); }
+
+/** 펼친 포스트잇의 삭제(×) 버튼 영역 (어두운 띠의 오른쪽 끝) */
+export function noteDeleteButton(n) {
+  const s = noteBtnW(n);
   return { x: n.x + n.w - s, y: n.y, w: s, h: noteHeadH(n) };
 }
 
-/** 끌어 옮기는 손잡이 영역: 펼친 상태는 어두운 띠(접기 버튼 제외), 접힌 상태는 아이콘 전체 */
+/** 펼친 포스트잇의 접기(–) 버튼 영역 (삭제 버튼 바로 왼쪽) */
+export function noteFoldButton(n) {
+  const s = noteBtnW(n);
+  return { x: n.x + n.w - s * 2, y: n.y, w: s, h: noteHeadH(n) };
+}
+
+/** 끌어 옮기는 손잡이 영역: 펼친 상태는 어두운 띠(버튼 제외), 접힌 상태는 아이콘 전체 */
 export function noteHandle(n) {
   if (n.fold) return noteIconRect(n);
-  return { x: n.x, y: n.y, w: n.w - noteFoldButton(n).w, h: noteHeadH(n) };
+  return { x: n.x, y: n.y, w: n.w - noteBtnW(n) * 2, h: noteHeadH(n) };
 }
 
 const inRect = (b, r) => b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.w <= r.x + r.w + 0.5 && b.y + b.h <= r.y + r.h + 0.5;
@@ -366,12 +375,12 @@ function drawNote(ctx, item) {
   ctx.fillStyle = item.c;
   ctx.fillRect(item.x, item.y, item.w, item.h);
   ctx.restore();
-  // 어두운 띠(손잡이) + 가운데 잡는 표시 + 접기(–) 버튼
+  // 어두운 띠(손잡이) + 가운데 잡는 표시 + 접기(–)·삭제(×) 버튼
   const hh = noteHeadH(item);
   ctx.fillStyle = 'rgba(0,0,0,0.10)';
   ctx.fillRect(item.x, item.y, item.w, hh);
   ctx.fillStyle = 'rgba(0,0,0,0.30)';
-  const gx = item.x + item.w / 2, gy = item.y + hh / 2, gr = Math.max(0.6, hh * 0.07);
+  const gx = item.x + (item.w - noteBtnW(item) * 2) / 2, gy = item.y + hh / 2, gr = Math.max(0.6, hh * 0.07);
   for (const dx of [-hh * 0.4, 0, hh * 0.4]) { ctx.beginPath(); ctx.arc(gx + dx, gy, gr, 0, Math.PI * 2); ctx.fill(); }
   const fb = noteFoldButton(item);
   ctx.strokeStyle = 'rgba(0,0,0,0.45)';
@@ -379,6 +388,8 @@ function drawNote(ctx, item) {
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(fb.x + fb.w * 0.3, fb.y + fb.h * 0.5); ctx.lineTo(fb.x + fb.w * 0.7, fb.y + fb.h * 0.5);
+  const db = noteDeleteButton(item), cx = db.x + db.w / 2, cy = db.y + db.h / 2, xs = Math.min(db.w, db.h) * 0.2;
+  ctx.moveTo(cx - xs, cy - xs); ctx.lineTo(cx + xs, cy + xs); ctx.moveTo(cx + xs, cy - xs); ctx.lineTo(cx - xs, cy + xs);
   ctx.stroke();
   if (!item.text) return;
   ctx.save();

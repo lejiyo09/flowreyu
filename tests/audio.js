@@ -34,7 +34,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.click('#btnRec');
   check('recording panel opens', await page.locator('#audioPanel').isVisible());
   await page.click('#apRecBtn');
-  await page.waitForTimeout(300);
+  await page.waitForSelector('#recChip:not([hidden])', { timeout: 5000 }).catch(() => {}); // 마이크 열기는 느릴 수 있음
   check('recording starts (red timer chip)', await page.locator('#recChip').isVisible());
   await h.pen(cdp, h.line(X(150), Y(250), X(350), Y(250), 10)); // A
   await page.waitForTimeout(1500);

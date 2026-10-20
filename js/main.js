@@ -11,7 +11,7 @@ import { AudioRecorder, fmtTime } from './audio.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, tableHandle, tableDeleteButton, tableBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, tableHandle, tableDeleteButton, tableBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -658,6 +658,15 @@ function tapObjectAt(page, x, y) {
     if (n.t !== 'nt') continue;
     if (n.fold && inside(noteIconRect(n), x, y)) { setNotesFold(page, new Set([n.id]), false); return true; }
     if (!n.fold && inside(noteFoldButton(n), x, y)) { setNotesFold(page, new Set([n.id]), true); return true; }
+    if (!n.fold && inside(noteDeleteButton(n), x, y)) {
+      commitTextEdit();
+      tools.clearSelection();
+      // 포스트잇과 그 위에 쓴 필기를 함께 삭제 (실행 취소 가능)
+      const ids = new Set([n.id, ...noteAttached(items, n)]);
+      d.setItems(page, items.filter((it) => !ids.has(it.id)));
+      toast('포스트잇을 삭제했습니다 · 실행 취소로 되돌릴 수 있음');
+      return true;
+    }
   }
   return false;
 }
