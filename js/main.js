@@ -11,7 +11,7 @@ import { AudioRecorder, fmtTime } from './audio.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, tableHandle, tableDeleteButton, tableBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -635,6 +635,15 @@ function tapObjectAt(page, x, y) {
   const items = d?.items(page) || [];
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
+    if ((n.t === 'cl' || n.t === 'tb') && inside(objDeleteButton(n), x, y)) {
+      commitTextEdit();
+      tools.clearSelection();
+      // 표·체크리스트와 그 위에 쓴 필기를 함께 삭제 (실행 취소 가능)
+      const ids = new Set([n.id, ...noteAttached(items, n)]);
+      d.setItems(page, items.filter((it) => !ids.has(it.id)));
+      toast(`${n.t === 'cl' ? '체크리스트' : '표'}를 삭제했습니다 · 실행 취소로 되돌릴 수 있음`);
+      return true;
+    }
     if (n.t === 'cl') {
       const r = checkRowAt(n, x, y);
       if (r < 0) continue;
@@ -644,16 +653,6 @@ function tapObjectAt(page, x, y) {
         return true;
       }
       continue;
-    }
-    if (n.t === 'tb') {
-      if (!inside(tableDeleteButton(n), x, y)) continue;
-      commitTextEdit();
-      tools.clearSelection();
-      // 표와 그 위에 쓴 필기를 함께 삭제 (실행 취소 가능)
-      const ids = new Set([n.id, ...noteAttached(items, n)]);
-      d.setItems(page, items.filter((it) => !ids.has(it.id)));
-      toast('표를 삭제했습니다 · 실행 취소로 되돌릴 수 있음');
-      return true;
     }
     if (n.t !== 'nt') continue;
     if (n.fold && inside(noteIconRect(n), x, y)) { setNotesFold(page, new Set([n.id]), false); return true; }
@@ -683,7 +682,7 @@ function noteDragStart(sx, sy) {
   const items = d.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
-    const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' ? tableHandle(n) : null;
+    const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' || n.t === 'cl' ? objHandle(n) : null;
     if (!handle || !inside(handle, hit.x, hit.y)) continue;
     commitTextEdit();
     tools.clearSelection();
@@ -740,7 +739,8 @@ function insertChecklist(at) {
   if (!doc) return;
   const hit = placeAt(at), p = viewer.pages[hit.page], z = viewer.cam.z;
   const w = Math.min(260 / z, p.w * 0.8), fs = 15 / z;
-  const item = { id: uid('cl'), t: 'cl', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - fs * 2, 0, p.h - fs * 3), w, fs, c: '#1c1f24', rows: [{ text: '', done: false }] };
+  const bh = objBarH({ fs }); // 위쪽 손잡이 띠가 페이지 밖으로 나가지 않게
+  const item = { id: uid('cl'), t: 'cl', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - fs * 2, bh, Math.max(bh, p.h - fs * 3)), w, fs, c: '#1c1f24', rows: [{ text: '', done: false }] };
   doc.add(hit.page, item);
   startTextEdit(hit.page, item, undefined, undefined, { isNew: true });
 }
@@ -752,7 +752,7 @@ function insertTable(rows, cols, at) {
   const fs = 13 / z;
   const w = Math.min(cols * 110 / z, p.w * 0.9), h = Math.min(rows * fs * 2.2, p.h * 0.8);
   const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
-  const bh = tableBarH({ fs }); // 위쪽 손잡이 띠가 페이지 밖으로 나가지 않게
+  const bh = objBarH({ fs }); // 위쪽 손잡이 띠가 페이지 밖으로 나가지 않게
   const item = { id: uid('tb'), t: 'tb', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, bh, Math.max(bh, p.h - h)), w, h, fs, cells };
   doc.add(hit.page, item);
   startTextEdit(hit.page, item, undefined, undefined, { cell: { r: 0, c: 0 } });
@@ -1234,7 +1234,8 @@ $('#aiTodos').addEventListener('click', () => {
   if (!todos?.length || !d) return;
   const hit = placeAt(), p = viewer.pages[hit.page], z = viewer.cam.z;
   const w = Math.min(300 / z, p.w * 0.8), fs = 14 / z;
-  const item = { id: uid('cl'), t: 'cl', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - fs * 2, 0, p.h - fs * 3), w, fs, c: '#1c1f24', rows: todos.map((text) => ({ text, done: false })) };
+  const bh = objBarH({ fs });
+  const item = { id: uid('cl'), t: 'cl', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - fs * 2, bh, Math.max(bh, p.h - fs * 3)), w, fs, c: '#1c1f24', rows: todos.map((text) => ({ text, done: false })) };
   d.add(hit.page, item);
   toast(`할 일 ${todos.length}개를 체크리스트로 넣었습니다`);
 });

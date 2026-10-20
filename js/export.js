@@ -4,7 +4,7 @@ import {
   moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
   setStrokingRgbColor, setGraphicsState, drawObject,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
-import { strokeRuns, shapePolylines, textLayout, drawItem, bbox, foldHidden } from './ink.js';
+import { strokeRuns, shapePolylines, textLayout, drawItem, bbox, foldHidden, checkHeight } from './ink.js';
 
 function hexToRgb(hex) {
   let h = hex.replace('#', '');
@@ -94,7 +94,7 @@ function addLinkAnnot(pdf, pages, page, inv, it) {
 
 /** 글상자/포스트잇을 고해상도 PNG 로 그려 넣는다 (포스트잇 그림자 여백 포함) */
 async function renderItemImage(pdf, it) {
-  const b = it.t === 'tx' ? (() => { const L = textLayout(it); return { x: it.x, y: it.y, w: L.w, h: L.h }; })() : it.t === 'tb' ? { x: it.x, y: it.y, w: it.w, h: it.h } : bbox(it);
+  const b = it.t === 'tx' ? (() => { const L = textLayout(it); return { x: it.x, y: it.y, w: L.w, h: L.h }; })() : it.t === 'tb' ? { x: it.x, y: it.y, w: it.w, h: it.h } : it.t === 'cl' ? { x: it.x, y: it.y, w: it.w, h: checkHeight(it) } : bbox(it); // 화면 전용 손잡이 띠 제외
   const m = it.t === 'nt' ? 8 : 0;
   const box = { x: b.x - m, y: b.y - m, w: b.w + m * 2, h: b.h + m * 2 };
   const scale = 4;

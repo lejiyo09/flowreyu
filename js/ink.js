@@ -141,8 +141,8 @@ function computeBBox(item) {
     return { x: item.x, y: item.y, w: L.w, h: L.h };
   }
   if (item.t === 'nt' && item.fold) return noteIconRect(item);
-  if (item.t === 'cl') return { x: item.x, y: item.y, w: item.w, h: checkHeight(item) };
-  if (item.t === 'tb') { const bh = tableBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
+  if (item.t === 'cl') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: checkHeight(item) + bh }; } // 위쪽 손잡이 띠 포함
+  if (item.t === 'tb') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
   if (item.t === 'ln' || item.t === 'im' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
@@ -211,7 +211,7 @@ export function drawItem(ctx, item, opts) {
   } else if (item.t === 'nt') {
     drawNote(ctx, item);
   } else if (item.t === 'cl') {
-    drawChecklist(ctx, item);
+    drawChecklist(ctx, item, opts);
   } else if (item.t === 'tb') {
     drawTable(ctx, item, opts);
   } else if (item.t === 'tx') {
@@ -299,7 +299,7 @@ export function noteAttached(items, note) {
   const out = [];
   const i0 = items.indexOf(note);
   if (i0 < 0) return out;
-  const rect = { x: note.x, y: note.y, w: note.w, h: note.h };
+  const rect = { x: note.x, y: note.y, w: note.w, h: note.t === 'cl' ? checkHeight(note) : note.h };
   for (let j = i0 + 1; j < items.length; j++) {
     const it = items[j];
     if ((it.t === 's' || it.t === 'sh' || it.t === 'tx') && inRect(bbox(it), rect)) out.push(it.id);
@@ -421,8 +421,9 @@ export function checkRowAt(it, x, y) {
   return i >= 0 && i < it.rows.length ? i : -1;
 }
 
-function drawChecklist(ctx, it) {
+function drawChecklist(ctx, it, opts) {
   const rh = checkRowH(it);
+  if (!opts?.print) drawObjBar(ctx, it);
   ctx.save();
   ctx.beginPath();
   ctx.rect(it.x, it.y, it.w, checkHeight(it));
@@ -468,13 +469,13 @@ function roundRectPath(ctx, x, y, w, h, r) {
 }
 
 // ── 표 ──
-// 표 위쪽 바깥에 붙은 어두운 손잡이 띠: 잡고 끌면 이동, 오른쪽 끝 × 를 탭하면 삭제 (포스트잇 띠와 같은 방식)
-export function tableBarH(it) { return Math.max(12, Math.min(22, it.fs * 1.6)); }
-export function tableBar(it) { const h = tableBarH(it); return { x: it.x, y: it.y - h, w: it.w, h }; }
+// 표·체크리스트 위쪽 바깥에 붙은 어두운 손잡이 띠: 잡고 끌면 이동, 오른쪽 끝 × 를 탭하면 삭제 (포스트잇 띠와 같은 방식)
+export function objBarH(it) { return Math.max(12, Math.min(22, it.fs * 1.6)); }
+export function objBar(it) { const h = objBarH(it); return { x: it.x, y: it.y - h, w: it.w, h }; }
 /** 삭제(×) 버튼: 띠 오른쪽 끝 정사각형 */
-export function tableDeleteButton(it) { const b = tableBar(it), s = Math.min(b.h * 1.3, it.w * 0.3); return { x: b.x + b.w - s, y: b.y, w: s, h: b.h }; }
+export function objDeleteButton(it) { const b = objBar(it), s = Math.min(b.h * 1.3, it.w * 0.3); return { x: b.x + b.w - s, y: b.y, w: s, h: b.h }; }
 /** 끌어 옮기는 손잡이: 띠에서 삭제 버튼을 뺀 부분 */
-export function tableHandle(it) { const b = tableBar(it); return { ...b, w: b.w - tableDeleteButton(it).w }; }
+export function objHandle(it) { const b = objBar(it); return { ...b, w: b.w - objDeleteButton(it).w }; }
 export function tableSize(it) { return { rows: it.cells.length, cols: it.cells[0]?.length || 0 }; }
 export function cellRect(it, r, c) {
   const { rows, cols } = tableSize(it);
@@ -487,8 +488,8 @@ export function cellAt(it, x, y) {
   return { r: Math.min(rows - 1, Math.floor((y - it.y) / (it.h / rows))), c: Math.min(cols - 1, Math.floor((x - it.x) / (it.w / cols))) };
 }
 
-function drawTableBar(ctx, it) {
-  const b = tableBar(it), del = tableDeleteButton(it), r = Math.min(b.h * 0.35, 6);
+function drawObjBar(ctx, it) {
+  const b = objBar(it), del = objDeleteButton(it), r = Math.min(b.h * 0.35, 6);
   ctx.save();
   ctx.fillStyle = 'rgba(55,65,85,0.88)';
   ctx.beginPath();
@@ -514,7 +515,7 @@ function drawTableBar(ctx, it) {
 
 function drawTable(ctx, it, opts) {
   const { rows, cols } = tableSize(it);
-  if (!opts?.print) drawTableBar(ctx, it);
+  if (!opts?.print) drawObjBar(ctx, it);
   ctx.save();
   ctx.fillStyle = 'rgba(255,255,255,0.92)';
   ctx.fillRect(it.x, it.y, it.w, it.h);

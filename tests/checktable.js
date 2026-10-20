@@ -65,6 +65,35 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await h.pen(cdp, h.line(X(c2.x - 80), Y(c2.y), X(c2.x + 80), Y(c2.y), 8));
   check('eraser leaves checklist', !!(await find('cl')));
 
+  // ── 체크리스트 손잡이 띠: 끌어 옮기기, × 탭으로 삭제 ──
+  await page.click('#toolbar [data-tool=pen]');
+  await page.waitForTimeout(400);
+  cl = await find('cl');
+  const clBar = (it) => Math.max(12, Math.min(22, it.fs * 1.6));
+  const zz = await page.evaluate(() => __flexnote.viewer.cam.z);
+  let hb = await S(cl.p, cl.it.x + cl.it.w * 0.3, cl.it.y - clBar(cl.it) / 2);
+  const sc0 = await strokes();
+  await h.pen(cdp, h.line(X(hb.x), Y(hb.y), X(hb.x + 50), Y(hb.y + 30), 10));
+  await page.waitForTimeout(200);
+  let cl2 = await find('cl');
+  check('pen drag on checklist bar moves it (no stroke)', Math.abs(cl2.it.x - cl.it.x - 50 / zz) < 2 && Math.abs(cl2.it.y - cl.it.y - 30 / zz) < 2 && (await strokes()) === sc0, `${cl.it.x}->${cl2.it.x}`);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(400);
+  const clDel = async (it) => { const bh = clBar(it), sz = Math.min(bh * 1.3, it.w * 0.3); return S(cl.p, it.x + it.w - sz / 2, it.y - bh / 2); };
+  let cdp1 = await clDel(cl.it);
+  await h.pen(cdp, [[X(cdp1.x), Y(cdp1.y), 0.5]]);
+  await page.waitForTimeout(200);
+  check('pen tap on checklist × deletes it (no dot)', !(await find('cl')) && (await strokes()) === sc0);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(400);
+  check('undo restores checklist with its rows', (await find('cl'))?.it.rows.length === 4);
+  await h.touch(cdp, 'touchStart', [[X(cdp1.x), Y(cdp1.y), 1]]);
+  await h.touch(cdp, 'touchEnd', [[X(cdp1.x), Y(cdp1.y), 1]]);
+  await page.waitForTimeout(200);
+  check('finger tap on checklist × deletes it', !(await find('cl')));
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(300);
+
   // ── 표 ──
   await page.click('#toolbar [data-tool=pen]');
   await page.click('#btnTable');
