@@ -128,6 +128,18 @@ function sse(text, { finish = 'STOP', model = 'gemini-3.8-flash' } = {}) {
   const notes = await page.evaluate(() => __flexnote.state.doc.items(__flexnote.viewer.currentPage()).filter((i) => i.t === 'nt').map((i) => i.text));
   check('minutes pasted as note', notes.some((t) => t.startsWith('■ 제목: 주간 회의')) && (await page.evaluate(() => __flexnote.state.doc.items(0).length)) === before + 2);
 
+  // #gk=키 링크로 한 번 열면 이 기기에 키 저장 + 주소에서 지움
+  await page.goto((process.env.APP_URL || 'http://localhost:8080/') + '#gk=AQ.link-key-9');
+  await page.waitForTimeout(600);
+  check('#gk= link stores key and strips it from URL', (await page.evaluate(() => localStorage.getItem('flexnote.geminiKey'))) === 'AQ.link-key-9' && !page.url().includes('gk='), page.url());
+  await page.evaluate(() => localStorage.setItem('flexnote.geminiKey', 'AQ.test-key-123'));
+  await page.click('.doc-card, #library [data-doc]').catch(() => {});
+  await page.waitForSelector('#editor:not([hidden])', { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(800);
+  if (!(await page.locator('#editor').isVisible())) { await page.setInputFiles('#fileInput', h.S + '/sample.pdf'); await page.waitForSelector('#editor:not([hidden])'); await page.waitForTimeout(800); }
+  if (await page.locator('#aiPanel').isHidden()) await page.click('#btnAi');
+  await page.waitForTimeout(200);
+  await page.click('#aiTabs button[value=minutes]');
   // 오류: 잘못된 키 / 거절 / 중지
   mode = 'auth';
   await page.click('#aiRun');

@@ -1,12 +1,16 @@
 // AI 도우미 (Google Gemini API): 회의록 정리·요약, 맞춤법·문법 검사, 번역
 //
-// - 사용자가 직접 발급한 Gemini API 키(aistudio.google.com)를 이 기기(localStorage)에만 저장하고,
-//   브라우저에서 generativelanguage.googleapis.com 으로 바로 보낸다. 서버를 거치지 않는다. (공용 기기에서는 쓰지 말 것)
-// - 키를 코드·저장소에 넣지 말 것: GitHub Pages 로 공개되면 누구나 가져다 쓴다.
+// - 키 우선순위: 설정에서 넣은 키(이 기기 localStorage) → 내장 키(BUILTIN_KEY, 비어 있으면 없음).
+//   BUILTIN_KEY 에 키를 넣으면 입력 없이 동작하지만, 공개 저장소라 누구나 볼 수 있으므로
+//   Google Cloud 콘솔에서 웹사이트 제한(HTTP 리퍼러)·API 제한을 반드시 걸 것.
+// - 주소 뒤에 #gk=키 를 붙여 한 번 열면 그 기기에 키가 저장된다 (# 뒤는 서버로 전송되지 않음).
+// - 키는 generativelanguage.googleapis.com 으로만 보낸다.
 // - 기본 모델은 Gemini 3 Flash. Pro 는 무료 키로 쓸 수 없어(사용량 0) 목록에서 뺐다.
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const KEY_STORE = 'flexnote.geminiKey';
+/** 내장 키 (선택). 여기 넣으면 키 입력 없이 동작 — 위 주의 사항 참고 */
+export const BUILTIN_KEY = '';
 
 /** [id, 이름, 설명] */
 export const AI_MODELS = [
@@ -21,8 +25,21 @@ export const TRANSLATE_LANGS = [
 ];
 const LANG_NAME = Object.fromEntries(TRANSLATE_LANGS);
 
-export function getApiKey() {
+/** 설정에서 직접 넣은 키 (없으면 '') */
+export function getUserKey() {
   try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; }
+}
+/** 실제로 쓸 키: 직접 넣은 키, 없으면 내장 키 */
+export function getApiKey() { return getUserKey() || BUILTIN_KEY; }
+
+/** 주소의 #gk=키 를 이 기기에 저장하고 주소에서는 지운다 (키 입력 없이 기기 설정용 링크). 저장했으면 true */
+export function importKeyFromHash() {
+  const m = /(?:^#|&)gk=([^&]+)/.exec(location.hash || '');
+  if (!m) return false;
+  setApiKey(decodeURIComponent(m[1]));
+  const rest = location.hash.replace(/(?:^#|&)gk=[^&]+/, '').replace(/^&/, '');
+  history.replaceState(null, '', location.pathname + location.search + (rest ? '#' + rest : ''));
+  return true;
 }
 export function setApiKey(k) {
   try { if (k && k.trim()) localStorage.setItem(KEY_STORE, k.trim()); else localStorage.removeItem(KEY_STORE); } catch { /* */ }

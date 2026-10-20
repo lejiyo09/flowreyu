@@ -8,7 +8,7 @@ import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { AudioRecorder, fmtTime } from './audio.js';
-import { askAi, AiError, AI_MODELS, getApiKey, setApiKey, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
+import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
 import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteAttached, noteHandle, noteTextTop, tableHandle, tableDeleteButton, tableBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
@@ -1884,6 +1884,10 @@ function openSettings() {
 }
 $('#setAiKey').addEventListener('change', (e) => { setApiKey(e.target.value); $('#aiNoKey').hidden = !!getApiKey(); });
 $('#btnAiKeyClear').addEventListener('click', () => { setApiKey(''); $('#setAiKey').value = ''; toast('API 키를 지웠습니다'); });
+// 주소 #gk=키 로 키 저장 (처음 열 때 + 이미 열린 앱의 주소만 바꿨을 때)
+const takeHashKey = () => { if (importKeyFromHash()) { toast('Gemini API 키를 이 기기에 저장했습니다'); $('#aiNoKey').hidden = true; } };
+setTimeout(takeHashKey, 300);
+window.addEventListener('hashchange', takeHashKey);
 for (const [id, name, hint] of AI_MODELS) $('#setAiModel').insertAdjacentHTML('beforeend', `<option value="${id}" title="${escapeHtml(hint)}">${escapeHtml(name)}</option>`);
 $('#setAiModel').addEventListener('change', (e) => settings.set('ai', { ...settings.get('ai'), model: e.target.value }));
 $('#setAiEffort').addEventListener('change', (e) => settings.set('ai', { ...settings.get('ai'), effort: e.target.value }));
@@ -1902,7 +1906,7 @@ for (const [key, label, hint, extra] of GESTURES) {
 function syncSettingsForm() {
   for (const sel of dlg.querySelectorAll('[data-gesture]')) sel.value = settings.get('gestures')[sel.dataset.gesture];
   $('#setEraserReturn').checked = !!settings.get('eraser').autoReturn;
-  $('#setAiKey').value = getApiKey();
+  $('#setAiKey').value = getUserKey();
   $('#setAiEffort').value = settings.get('ai').effort;
   $('#setAiModel').value = settings.get('ai').model;
   for (const el of dlg.querySelectorAll('[data-setting]')) {
