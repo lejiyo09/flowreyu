@@ -1017,7 +1017,16 @@ async function openAiPanel() {
 function closeAiPanel() { $('#aiPanel').hidden = true; }
 $('#btnAi').addEventListener('click', () => { if ($('#aiPanel').hidden) openAiPanel(); else closeAiPanel(); });
 $('#aiClose').addEventListener('click', closeAiPanel);
-$('#aiOpenSettings').addEventListener('click', () => { closeAiPanel(); openSettings(); setTimeout(() => $('#setAiKey').focus(), 50); });
+// AI 창에서 바로 키 저장
+$('#aiKeySave').addEventListener('click', () => {
+  const k = $('#aiKeyInput').value.trim();
+  if (!k) { $('#aiKeyInput').focus(); return; }
+  setApiKey(k);
+  $('#aiKeyInput').value = '';
+  $('#aiNoKey').hidden = !!getApiKey();
+  toast('Gemini API 키를 저장했습니다. 이제 실행을 누르세요');
+});
+$('#aiKeyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#aiKeySave').click(); } });
 $('#aiTabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
   aiKind = b.value;
   $('#aiTabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
@@ -1882,7 +1891,8 @@ function openSettings() {
   $('#btnBackupExport').disabled = $('#btnBackupImport').disabled = !state.doc;
   dlg.showModal();
 }
-$('#setAiKey').addEventListener('change', (e) => { setApiKey(e.target.value); $('#aiNoKey').hidden = !!getApiKey(); });
+// 붙여 넣는 즉시 저장 (모바일에서 창을 바로 닫아도 남도록)
+$('#setAiKey').addEventListener('input', (e) => { setApiKey(e.target.value); $('#aiNoKey').hidden = !!getApiKey(); });
 $('#btnAiKeyClear').addEventListener('click', () => { setApiKey(''); $('#setAiKey').value = ''; toast('API 키를 지웠습니다'); });
 // 주소 #gk=키 로 키 저장 (처음 열 때 + 이미 열린 앱의 주소만 바꿨을 때)
 const takeHashKey = () => { if (importKeyFromHash()) { toast('Gemini API 키를 이 기기에 저장했습니다'); $('#aiNoKey').hidden = true; } };

@@ -61,11 +61,16 @@ function sse(text, { finish = 'STOP', model = 'gemini-3.8-flash' } = {}) {
   await page.waitForTimeout(200);
   check('no request without key', reqs.length === 0);
 
-  // 설정에서 키 입력
-  await page.click('#aiOpenSettings');
+  // AI 창에서 바로 키 저장
+  await page.fill('#aiKeyInput', 'AQ.panel-key-1');
+  await page.click('#aiKeySave');
+  await page.waitForTimeout(100);
+  check('key saved from AI panel, notice hidden', (await page.evaluate(() => localStorage.getItem('flexnote.geminiKey'))) === 'AQ.panel-key-1' && await page.locator('#aiNoKey').isHidden());
+  // 설정 칸: 붙여 넣는 즉시 저장
+  await page.click('#aiClose');
+  await page.click('#btnSettings');
   await page.waitForTimeout(200);
   await page.fill('#setAiKey', 'AQ.test-key-123');
-  await page.dispatchEvent('#setAiKey', 'change');
   check('key saved locally', (await page.evaluate(() => localStorage.getItem('flexnote.geminiKey'))) === 'AQ.test-key-123');
   check('key not inside settings JSON', !(await page.evaluate(() => localStorage.getItem('flexnote.settings.v1') || '')).includes('AQ.test'));
   check('model select lists Gemini models (3 Flash default)', (await page.inputValue('#setAiModel')) === 'gemini-3-flash-preview' && (await page.locator('#setAiModel option').count()) === 3);

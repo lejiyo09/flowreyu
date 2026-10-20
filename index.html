@@ -207,8 +207,8 @@
       <button class="icon-btn sm" id="aiClose" title="닫기"><svg><use href="#i-close"/></svg></button>
     </div>
     <div class="ai-nokey" id="aiNoKey" hidden>
-      <p class="small" style="margin:0">AI 기능은 본인의 Gemini API 키가 필요합니다 (aistudio.google.com 에서 무료 발급, 인터넷 필요).</p>
-      <button class="btn sm primary" id="aiOpenSettings">설정에서 키 입력</button>
+      <p class="small" style="margin:0">Gemini API 키를 아래 칸에 붙여 넣고 <b>저장</b>을 누르세요 (기기마다 한 번).</p>
+      <div class="ai-keyrow"><input type="password" id="aiKeyInput" placeholder="AQ.... 또는 AIza..." autocomplete="off" spellcheck="false"><button class="btn sm primary" id="aiKeySave">저장</button></div>
     </div>
     <div class="ai-tabs seg" id="aiTabs">
       <button value="minutes" class="on">회의록 정리·요약</button><button value="grammar">맞춤법·문법</button><button value="translate">번역</button>
