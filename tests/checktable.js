@@ -65,6 +65,27 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await h.pen(cdp, h.line(X(c2.x - 80), Y(c2.y), X(c2.x + 80), Y(c2.y), 8));
   check('eraser leaves checklist', !!(await find('cl')));
 
+  // ── 항목 추가: Enter / Shift+Enter / Ctrl+Enter 모두 새 항목, 입력 중에도 상자가 바로 보임 ──
+  await page.click('#btnChecklist');
+  await page.waitForTimeout(150);
+  await page.keyboard.type('하나');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('둘');
+  await page.keyboard.press('Control+Enter');
+  await page.keyboard.type('셋');
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('넷');
+  check('boxes appear while typing (live preview)', (await page.evaluate(() => __flexnote.viewer.preview?.rows.length)) === 4, String(await page.evaluate(() => __flexnote.viewer.preview?.rows.length)));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  const clNew = await page.evaluate(() => { for (const its of __flexnote.state.doc.pages.values()) { const c = its.filter((i) => i.t === 'cl').at(-1); if (c && c.rows[0].text === '하나') return c.rows.map((r) => r.text); } return null; });
+  check('Shift+Enter / Ctrl+Enter / Enter add items', JSON.stringify(clNew) === JSON.stringify(['하나', '둘', '셋', '넷']), JSON.stringify(clNew));
+  check('preview cleared after editing', !(await page.evaluate(() => __flexnote.viewer.preview)));
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(150);
+  await page.keyboard.press('Control+z');
+  await page.waitForTimeout(150);
+
   // ── 체크리스트 손잡이 띠: 끌어 옮기기, × 탭으로 삭제 ──
   await page.click('#toolbar [data-tool=pen]');
   await page.waitForTimeout(400);

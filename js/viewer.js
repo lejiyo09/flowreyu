@@ -567,7 +567,9 @@ export class Viewer extends Emitter {
     if (!this.doc) return;
     const sel = this.selection;
     for (const p of this.visiblePages(0.05)) {
-      const items = layerSorted(this.doc.items(p.index)); // 레이어 순서대로
+      let items = layerSorted(this.doc.items(p.index)); // 레이어 순서대로
+      // 편집 중 미리 보기 (체크리스트에 줄을 추가하면 저장 전에도 상자가 보이도록)
+      if (this.preview) items = items.map((it) => (it.id === this.preview.id ? this.preview : it));
       if (!items.length) continue;
       // 화면에 보이는 페이지 영역 (페이지 좌표)
       const w0 = this.toWorld(0, 0), w1 = this.toWorld(this.vw, this.vh);

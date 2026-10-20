@@ -1936,6 +1936,7 @@ function startTextEdit(page, item, x, y, opts = {}) {
     : ed.kind === 'cell' ? item.cells[ed.cell.r][ed.cell.c]
     : item ? item.text : '';
   te.hidden = false;
+  previewChecklist();
   positionTextEditor();
   // 화면 키보드가 뜨도록 포커스 (펜 탭 직후). 바로 한 번 + 이벤트 처리 뒤 한 번
   const focusEnd = () => { if (state.editing !== ed) return; te.focus({ preventScroll: true }); te.setSelectionRange(te.value.length, te.value.length); };
@@ -1987,7 +1988,22 @@ function positionTextEditor() {
     width: Math.max(L.w * z + ed.fs * z * 1.5, 60) + 'px', height: L.h * z + 4 + 'px',
   });
 }
-te.addEventListener('input', positionTextEditor);
+te.addEventListener('input', () => { previewChecklist(); positionTextEditor(); });
+
+/** 체크리스트 편집 중: 지금 입력한 줄 수만큼 상자를 바로 그려 보여 준다 (저장·실행 취소 기록은 확정할 때) */
+function previewChecklist() {
+  const ed = state.editing;
+  if (ed?.kind !== 'check') { if (viewer.preview) { viewer.preview = null; viewer.requestInk(); } return; }
+  const cur = state.doc?.items(ed.page).find((i) => i.id === ed.item.id);
+  if (!cur) return;
+  const pool = [...cur.rows];
+  const rows = te.value.split('\n').map((l) => {
+    const j = pool.findIndex((r) => r.text === l.replace(/\s+$/, ''));
+    return { text: '', done: j >= 0 ? pool.splice(j, 1)[0].done : false }; // 글은 입력칸이 보여 주므로 상자만
+  });
+  viewer.preview = { ...cur, rows };
+  viewer.requestInk();
+}
 // 다른 곳을 누르면 확정. 단, 그사이 다른 편집(표의 다음 칸 등)이 시작됐으면 그것은 건드리지 않는다
 te.addEventListener('blur', () => {
   const ed = state.editing;
@@ -1996,6 +2012,13 @@ te.addEventListener('blur', () => {
 // 표: Tab / Shift+Tab 으로 다음·이전 칸
 te.addEventListener('keydown', (e) => {
   const ed = state.editing;
+  // 체크리스트: Enter·Shift+Enter·Ctrl+Enter 모두 새 항목 (한글 조합 중 Enter 는 조합 확정이므로 건드리지 않음)
+  if (ed?.kind === 'check' && e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey)) {
+    e.preventDefault();
+    te.setRangeText('\n', te.selectionStart, te.selectionEnd, 'end');
+    te.dispatchEvent(new Event('input'));
+    return;
+  }
   if (e.key !== 'Tab' || ed?.kind !== 'cell') return;
   e.preventDefault();
   const { rows, cols } = tableSize(ed.item);
@@ -2012,6 +2035,7 @@ function commitTextEdit({ keepFocus = false } = {}) {
   if (!ed) return;
   state.editing = null;
   te.hidden = true;
+  if (viewer.preview) { viewer.preview = null; viewer.requestInk(); }
   te.style.padding = '0';
   te.style.whiteSpace = '';
   te.style.fontWeight = 'normal';
