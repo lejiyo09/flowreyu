@@ -27,6 +27,7 @@ export const GESTURE_ACTIONS = [
   ['insertTable', '표 넣기'],
   ['toggleRecord', '녹음 시작/정지'],
   ['aiPanel', 'AI 도우미 열기'],
+  ['layers', '레이어 패널 열기'],
   ['toggleFinger', '손가락 쓰기 켜기/끄기'],
   ['toggleRuler', '자 켜기/끄기'],
   ['toggleProt', '각도기 켜기/끄기'],

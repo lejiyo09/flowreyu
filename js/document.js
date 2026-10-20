@@ -26,6 +26,7 @@ export class NoteDocument extends Emitter {
     this.saving = null;
     this.retryMs = 0;
     this.closed = false;
+    this.activeLayer = null; // 새 객체를 넣을 레이어 id (기본 레이어면 null → ly 생략)
     this._saveSoon = debounce(() => this.save(), SAVE_DELAY);
   }
 
@@ -67,7 +68,10 @@ export class NoteDocument extends Emitter {
   }
 
   /** 맨 위에 객체 추가. appended 로 알려 화면은 새 객체만 덧그리면 된다 */
-  add(page, item) { this.setItems(page, [...this.items(page), item], { appended: item }); }
+  add(page, item) {
+    if (this.activeLayer && !item.ly) item = { ...item, ly: this.activeLayer }; // 현재 레이어에 넣기
+    this.setItems(page, [...this.items(page), item], { appended: item });
+  }
 
   commit() {
     const tx = this.tx;

@@ -407,3 +407,14 @@ input[type=range] { accent-color: var(--accent); }
 .ai-out .ai-explain { display: block; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted, #888); }
 .ai-keyrow { display: flex; gap: 6px; width: 100%; }
 .ai-keyrow input { flex: 1; min-width: 0; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: inherit; }
+.layer-panel { width: min(360px, calc(100vw - 16px)); }
+.ly-list { display: flex; flex-direction: column; gap: 4px; overflow-y: auto; max-height: 50vh; }
+.ly-row { display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 10px; background: var(--surface-2); border: 2px solid transparent; }
+.ly-row.on { border-color: var(--accent); }
+.ly-row.off .ly-name { opacity: 0.45; }
+.ly-row button { border: 0; background: none; color: inherit; border-radius: 8px; min-width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: 0 4px; }
+.ly-row button svg { width: 20px; height: 20px; }
+.ly-row .ly-name { flex: 1; min-width: 0; justify-content: flex-start; text-align: left; font-size: 14px; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ly-row .ly-name small { color: var(--muted); font-size: 11px; }
+.ly-row button.ly-del { color: var(--danger); }
+.ly-row button:disabled { opacity: 0.3; }

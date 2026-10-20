@@ -11,7 +11,7 @@ import { AudioRecorder, fmtTime } from './audio.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -64,7 +64,7 @@ const app = {
   isUiTarget: (el) => !!(el && el.closest && el.closest('[data-ui]')),
   runAction: (action, sx, sy, source) => runAction(action, sx, sy, source),
   showZoom: () => showZoomBadge(),
-  onSelection: (sel, dragging, m) => renderSelection(sel, dragging, m),
+  onSelection: (sel, dragging, m) => { renderSelection(sel, dragging, m); $('#lyMoveSel').hidden = !sel; },
   editText: (page, item, x, y) => startTextEdit(page, item, x, y),
   editLink: (page, item, rect) => editLink(page, item, rect),
   onEraserUsed: () => {
@@ -281,6 +281,7 @@ async function closeDoc() {
   tools.clearSelection();
   input.resetAll('close');
   closeQuickMenu(); closeToolPopup();
+  $('#layerPanel').hidden = true;
   const doc = state.doc;
   if (doc) {
     saveView.flush();
@@ -309,6 +310,7 @@ async function openDoc(id) {
     const { skipped } = await doc.load();
     state.doc = doc; state.pdf = pdf; state.blob = blob;
     wireDoc(doc);
+    initLayers(doc);
     $('#docTitle').textContent = meta.name;
     showScreen('editor');
     await viewer.open(pdf, doc, meta.view);
@@ -600,7 +602,8 @@ async function insertImageFile(file, at) {
     const p = viewer.pages[hit.page];
     const s = Math.min((p.w * 0.6) / w, (p.h * 0.5) / h, 1); // 페이지 폭 60%·높이 50% 안, 원본보다 키우지 않음
     const iw = w * s, ih = h * s;
-    const x = clamp(hit.x - iw / 2, 0, Math.max(0, p.w - iw)), y = clamp(hit.y - ih / 2, 0, Math.max(0, p.h - ih));
+    const bh = objBarH({}); // 위쪽 손잡이 띠가 페이지 밖으로 나가지 않게
+    const x = clamp(hit.x - iw / 2, 0, Math.max(0, p.w - iw)), y = clamp(hit.y - ih / 2, bh, Math.max(bh, p.h - ih));
     const item = { id: uid('im'), t: 'im', x, y, w: iw, h: ih, blob: id };
     doc.add(hit.page, item);
     selectAfterInsert(hit.page, item.id);
@@ -635,13 +638,14 @@ function tapObjectAt(page, x, y) {
   const items = d?.items(page) || [];
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
-    if ((n.t === 'cl' || n.t === 'tb') && inside(objDeleteButton(n), x, y)) {
+    if (!layerUsable(n)) continue; // 숨기거나 잠근 레이어
+    if ((n.t === 'cl' || n.t === 'tb' || n.t === 'im') && inside(objDeleteButton(n), x, y)) {
       commitTextEdit();
       tools.clearSelection();
-      // 표·체크리스트와 그 위에 쓴 필기를 함께 삭제 (실행 취소 가능)
+      // 표·체크리스트·그림과 그 위에 쓴 필기를 함께 삭제 (실행 취소 가능)
       const ids = new Set([n.id, ...noteAttached(items, n)]);
       d.setItems(page, items.filter((it) => !ids.has(it.id)));
-      toast(`${n.t === 'cl' ? '체크리스트' : '표'}를 삭제했습니다 · 실행 취소로 되돌릴 수 있음`);
+      toast(`${{ cl: '체크리스트', tb: '표', im: '그림' }[n.t]}을(를) 삭제했습니다 · 실행 취소로 되돌릴 수 있음`);
       return true;
     }
     if (n.t === 'cl') {
@@ -682,7 +686,8 @@ function noteDragStart(sx, sy) {
   const items = d.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
-    const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' || n.t === 'cl' ? objHandle(n) : null;
+    if (!layerUsable(n)) continue;
+    const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' || n.t === 'cl' || n.t === 'im' ? objHandle(n) : null;
     if (!handle || !inside(handle, hit.x, hit.y)) continue;
     commitTextEdit();
     tools.clearSelection();
@@ -793,6 +798,7 @@ let recTimer = 0, playRaf = 0, lastFollow = 0;
 
 function openAudioPanel() {
   closeToolPopup();
+  $('#layerPanel').hidden = true;
   $('#audioPanel').hidden = false;
   renderRecList();
 }
@@ -937,7 +943,7 @@ function seekToInkAt(page, x, y) {
   const items = state.doc.items(page);
   for (let i = items.length - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.rt?.rec === player.rec.id && hitTest(it, x, y, 10 / viewer.cam.z)) { seekTo(it.rt.t - 800, true); return true; }
+    if (it.rt?.rec === player.rec.id && !layerHidden(it) && hitTest(it, x, y, 10 / viewer.cam.z)) { seekTo(it.rt.t - 800, true); return true; }
   }
   return false;
 }
@@ -1017,6 +1023,7 @@ for (const [id, name] of TRANSLATE_LANGS) $('#aiLang').insertAdjacentHTML('befor
 async function openAiPanel() {
   closeToolPopup();
   $('#audioPanel').hidden = true;
+  $('#layerPanel').hidden = true;
   $('#aiPanel').hidden = false;
   $('#aiLang').value = settings.get('ai').lang;
   $('#aiNoKey').hidden = !!getApiKey();
@@ -1088,7 +1095,7 @@ async function pageImageBase64(i) {
   c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
   const ctx = c.getContext('2d');
   await page.render({ canvasContext: ctx, viewport: vp, background: '#ffffff' }).promise;
-  const items = state.doc.items(i);
+  const items = layerSorted(state.doc.items(i));
   const folded = foldHidden(items);
   const vis = folded ? items.filter((it) => !folded.has(it.id)) : items;
   const s = c.width / p.w;
@@ -1246,6 +1253,160 @@ $('#aiCopy').addEventListener('click', async () => {
   catch { toast('복사할 수 없습니다 (브라우저 권한)'); }
 });
 
+// ───────────────────────────── 레이어 ─────────────────────────────
+// 노트 전체 공통 레이어 목록 (아래 → 위 순서). 문서 메타(layers, activeLayer)에 저장된다.
+
+const defaultLayers = () => [{ id: DEFAULT_LAYER, name: '레이어 1', visible: true, locked: false }];
+let layers = defaultLayers();
+let activeLayer = DEFAULT_LAYER;
+
+function initLayers(doc) {
+  const saved = Array.isArray(doc.meta.layers) ? doc.meta.layers.filter((l) => l && typeof l.id === 'string' && /^L\w{1,40}$/.test(l.id)) : [];
+  layers = saved.length ? saved.map((l) => ({ id: l.id, name: String(l.name || '레이어'), visible: l.visible !== false, locked: !!l.locked })) : defaultLayers();
+  activeLayer = layers.some((l) => l.id === doc.meta.activeLayer) ? doc.meta.activeLayer : layers[layers.length - 1].id;
+  applyLayers(false);
+}
+
+/** 레이어 상태를 그리기·도구·저장에 반영 */
+function applyLayers(save = true) {
+  setLayerState(layers);
+  if (!layers.some((l) => l.id === activeLayer)) activeLayer = layers[layers.length - 1].id;
+  const d = state.doc;
+  if (d) d.activeLayer = activeLayer === DEFAULT_LAYER ? null : activeLayer;
+  viewer.requestInk();
+  if (d) for (const p of d.pages.keys()) thumbs.markInk(p);
+  $('#btnLayers').classList.toggle('on', layers.length > 1);
+  if (save && d) {
+    d.meta.layers = layers;
+    d.meta.activeLayer = activeLayer;
+    store.patchDoc(d.id, { layers, activeLayer }).catch(() => {});
+  }
+  if (!$('#layerPanel').hidden) renderLayers();
+}
+
+const layerById = (id) => layers.find((l) => l.id === id);
+/** 숨기거나 잠근 레이어가 현재 레이어면 쓸 수 있는 다른 레이어로 바꾼다 */
+function ensureUsableActive() {
+  const cur = layerById(activeLayer);
+  if (cur && cur.visible && !cur.locked) return;
+  const alt = [...layers].reverse().find((l) => l.visible && !l.locked);
+  if (alt) { activeLayer = alt.id; toast(`현재 레이어를 "${alt.name}"(으)로 바꿨습니다`); }
+  else toast('쓸 수 있는(보이고 잠기지 않은) 레이어가 없습니다', { error: true });
+}
+
+function layerCounts() {
+  const n = new Map();
+  for (const items of state.doc?.pages.values() || []) for (const it of items) { const l = layerOf(it); n.set(l, (n.get(l) || 0) + 1); }
+  return n;
+}
+
+function renderLayers() {
+  const box = $('#lyList');
+  box.innerHTML = '';
+  const counts = layerCounts();
+  const icon = (id) => `<svg><use href="#${id}"/></svg>`;
+  [...layers].reverse().forEach((l) => {
+    const i = layers.indexOf(l);
+    const row = document.createElement('div');
+    row.className = 'ly-row' + (l.id === activeLayer ? ' on' : '') + (l.visible ? '' : ' off');
+    row.dataset.id = l.id;
+    row.innerHTML = `<button data-a="vis" title="${l.visible ? '숨기기' : '보이기'}">${icon(l.visible ? 'i-eye' : 'i-eye-off')}</button>`
+      + `<button data-a="lock" title="${l.locked ? '잠금 풀기' : '잠그기 (지우개·올가미·편집 막기)'}">${icon(l.locked ? 'i-lock' : 'i-unlock')}</button>`
+      + `<button data-a="pick" class="ly-name" title="현재 레이어로">${escapeHtml(l.name)} <small>${counts.get(l.id) || 0}개</small></button>`
+      + `<button data-a="up" title="위로" ${i === layers.length - 1 ? 'disabled' : ''}>▲</button>`
+      + `<button data-a="down" title="아래로" ${i === 0 ? 'disabled' : ''}>▼</button>`
+      + `<button data-a="ren" title="이름 바꾸기">✎</button>`
+      + `<button data-a="del" class="ly-del" title="레이어 삭제" ${layers.length === 1 ? 'disabled' : ''}>${icon('i-close')}</button>`;
+    box.appendChild(row);
+  });
+  $('#lyMoveSel').hidden = !tools.selection;
+}
+
+$('#lyList').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-a]');
+  const row = b?.closest('.ly-row');
+  if (!b || !row) return;
+  const l = layerById(row.dataset.id);
+  if (!l) return;
+  const i = layers.indexOf(l);
+  switch (b.dataset.a) {
+    case 'pick':
+      activeLayer = l.id;
+      if (!l.visible || l.locked) { l.visible = true; l.locked = false; toast(`"${l.name}"을(를) 보이게 하고 잠금을 풀었습니다`); }
+      break;
+    case 'vis':
+      l.visible = !l.visible;
+      tools.clearSelection();
+      if (l.id === activeLayer && !l.visible) ensureUsableActive();
+      break;
+    case 'lock':
+      l.locked = !l.locked;
+      tools.clearSelection();
+      if (l.id === activeLayer && l.locked) ensureUsableActive();
+      break;
+    case 'up': if (i < layers.length - 1) [layers[i], layers[i + 1]] = [layers[i + 1], layers[i]]; break;
+    case 'down': if (i > 0) [layers[i], layers[i - 1]] = [layers[i - 1], layers[i]]; break;
+    case 'ren': {
+      const name = prompt('레이어 이름', l.name);
+      if (!name || !name.trim()) return;
+      l.name = name.trim().slice(0, 40);
+      break;
+    }
+    case 'del': {
+      if (layers.length === 1) return;
+      const n = layerCounts().get(l.id) || 0;
+      if (n && !confirm(`"${l.name}" 레이어와 그 안의 객체 ${n}개를 모든 페이지에서 삭제할까요?`)) return;
+      const d = state.doc;
+      tools.clearSelection();
+      if (d && n) {
+        // 객체 삭제는 한 번의 실행 취소로 되돌릴 수 있다 (되돌린 객체는 맨 아래 레이어로 들어감)
+        d.begin();
+        for (const [p, items] of [...d.pages]) if (items.some((it) => layerOf(it) === l.id)) d.setItems(p, items.filter((it) => layerOf(it) !== l.id));
+        d.commit();
+      }
+      layers.splice(i, 1);
+      if (activeLayer === l.id) activeLayer = layers[Math.min(i, layers.length - 1)].id;
+      toast(`"${l.name}" 레이어를 삭제했습니다${n ? ' · 실행 취소하면 객체는 맨 아래 레이어로 돌아옵니다' : ''}`);
+      break;
+    }
+  }
+  applyLayers();
+});
+
+$('#lyAdd').addEventListener('click', () => {
+  const nums = layers.map((l) => +(/^레이어 (\d+)$/.exec(l.name)?.[1] || 0));
+  const l = { id: 'L' + uid('').replace(/\W/g, '').slice(-10), name: `레이어 ${Math.max(layers.length, ...nums) + 1}`, visible: true, locked: false };
+  // 현재 레이어 바로 위에 추가하고 현재 레이어로
+  const i = layers.findIndex((x) => x.id === activeLayer);
+  layers.splice(i + 1, 0, l);
+  activeLayer = l.id;
+  applyLayers();
+});
+
+$('#lyMoveSel').addEventListener('click', () => {
+  const sel = tools.selection, d = state.doc;
+  if (!sel || !d) return;
+  const ly = activeLayer === DEFAULT_LAYER ? null : activeLayer;
+  d.setItems(sel.page, d.items(sel.page).map((it) => {
+    if (!sel.ids.has(it.id)) return it;
+    if (ly) return { ...it, ly };
+    const { ly: _old, ...rest } = it;
+    return rest;
+  }));
+  toast(`선택한 객체 ${sel.ids.size}개를 "${layerById(activeLayer).name}"(으)로 옮겼습니다`);
+  renderLayers();
+});
+
+function openLayerPanel() {
+  closeToolPopup();
+  $('#audioPanel').hidden = true;
+  $('#aiPanel').hidden = true;
+  $('#layerPanel').hidden = false;
+  renderLayers();
+}
+$('#btnLayers').addEventListener('click', () => { if ($('#layerPanel').hidden) openLayerPanel(); else $('#layerPanel').hidden = true; });
+$('#lyClose').addEventListener('click', () => { $('#layerPanel').hidden = true; });
+
 // ───────────────────────────── 링크 ─────────────────────────────
 
 let backAnchor = null;
@@ -1258,7 +1419,7 @@ async function followLinkAt(sx, sy) {
   const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
   const items = state.doc.items(hit.page);
   for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].t === 'ln' && inside(items[i])) { followTarget(items[i].to); return; }
+    if (items[i].t === 'ln' && !layerHidden(items[i]) && inside(items[i])) { followTarget(items[i].to); return; }
   }
   const links = await viewer.pdfLinks(hit.page);
   const l = links.find(inside);
@@ -1606,6 +1767,7 @@ function runAction(action, sx, sy, source) {
     case 'insertTable': $('#tableDlg').showModal(); break;
     case 'toggleRecord': toggleRecording(); break;
     case 'aiPanel': openAiPanel(); break;
+    case 'layers': openLayerPanel(); break;
     case 'toggleFinger': $('#btnFinger').click(); break;
     case 'toggleRuler': $('#btnRuler').click(); break;
     case 'toggleProt': $('#btnProt').click(); break;
@@ -1976,7 +2138,7 @@ $('#btnBackupExport').addEventListener('click', async () => {
     const rec = await store.getBlob(it.blob).catch(() => null);
     if (rec) images[it.blob] = { w: rec.w, h: rec.h, data: await blobToDataUrl(rec.data) };
   }
-  const data = { format: 'flexnote-ink', version: 2, name: d.meta.name, pageCount: viewer.pages.length, exported: new Date().toISOString(), pages, images };
+  const data = { format: 'flexnote-ink', version: 2, name: d.meta.name, pageCount: viewer.pages.length, exported: new Date().toISOString(), pages, images, layers };
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
   a.download = `${d.meta.name}_필기백업.json`;
@@ -1997,6 +2159,8 @@ $('#backupInput').addEventListener('change', async (e) => {
       const blob = await (await fetch(im.data)).blob();
       await store.putBlob({ id, docId: d.id, data: blob, w: im.w, h: im.h });
     }
+    // 백업의 레이어 목록도 복원 (없으면 지금 레이어 유지)
+    if (Array.isArray(data.layers) && data.layers.length) { d.meta.layers = data.layers; d.meta.activeLayer = null; initLayers(d); applyLayers(); }
     d.begin();
     let n = 0, bad = 0;
     for (let p = 0; p < viewer.pages.length; p++) {

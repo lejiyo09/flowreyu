@@ -143,7 +143,8 @@ function computeBBox(item) {
   if (item.t === 'nt' && item.fold) return noteIconRect(item);
   if (item.t === 'cl') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: checkHeight(item) + bh }; } // 위쪽 손잡이 띠 포함
   if (item.t === 'tb') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
-  if (item.t === 'ln' || item.t === 'im' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
+  if (item.t === 'im') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
+  if (item.t === 'ln' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -208,6 +209,7 @@ export function drawItem(ctx, item, opts) {
     drawLink(ctx, item);
   } else if (item.t === 'im') {
     drawImage(ctx, item);
+    if (!opts?.print) drawObjBar(ctx, item);
   } else if (item.t === 'nt') {
     drawNote(ctx, item);
   } else if (item.t === 'cl') {
@@ -307,9 +309,49 @@ export function noteAttached(items, note) {
   return out;
 }
 
-/** 접힌 포스트잇과 함께 숨길 객체 id (위에 쓴 필기) */
+// ── 레이어 ──
+// 레이어는 문서 전체 공통. 객체의 ly 가 레이어 id (없으면 기본 레이어 L0). 목록에 없는 레이어(지운 레이어를 실행 취소로 되살린 객체 등)는 맨 아래 레이어로 취급.
+// main.js 가 setLayerState 로 현재 레이어 목록(아래→위 순서)을 알려 주면 그리기 순서·숨김·잠금에 반영된다.
+export const DEFAULT_LAYER = 'L0';
+const layerState = { rank: new Map([[DEFAULT_LAYER, 0]]), hidden: new Set(), locked: new Set(), top: DEFAULT_LAYER, base: DEFAULT_LAYER, multi: false };
+export function setLayerState(layers) {
+  layerState.rank = new Map(layers.map((l, i) => [l.id, i]));
+  layerState.hidden = new Set(layers.filter((l) => !l.visible).map((l) => l.id));
+  layerState.locked = new Set(layers.filter((l) => l.locked).map((l) => l.id));
+  layerState.top = layers[layers.length - 1]?.id || DEFAULT_LAYER;
+  layerState.base = layers[0]?.id || DEFAULT_LAYER;
+  layerState.multi = layers.length > 1;
+}
+/** 객체의 레이어 id */
+export function layerOf(it) {
+  const id = it.ly || DEFAULT_LAYER;
+  return layerState.rank.has(id) ? id : layerState.base;
+}
+export function layerHidden(it) { return layerState.hidden.size > 0 && layerState.hidden.has(layerOf(it)); }
+/** 숨기거나 잠근 레이어의 객체는 지우개·올가미·탭으로 건드리지 않는다 */
+export function layerUsable(it) { const l = layerOf(it); return !layerState.hidden.has(l) && !layerState.locked.has(l); }
+/** 맨 위 레이어의 객체인지 (새 필기를 덧그리기만 해도 되는지) */
+export function onTopLayer(it) { return !layerState.multi || layerOf(it) === layerState.top; }
+/** 레이어 순서대로 정렬 (같은 레이어 안에서는 원래 순서). 레이어가 하나면 그대로 */
+export function layerSorted(items) {
+  if (!layerState.multi) return items;
+  let prev = -1, sorted = true;
+  for (const it of items) { const r = layerState.rank.get(layerOf(it)); if (r < prev) { sorted = false; break; } prev = r; }
+  if (sorted) return items;
+  return items.map((it, i) => [layerState.rank.get(layerOf(it)), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[2]);
+}
+/** 지우개·올가미가 건드리면 안 되는 객체 id: 접힌 포스트잇 위 필기 + 숨김·잠금 레이어 */
+export function inactiveIds(items) {
+  let out = foldHidden(items);
+  if (!layerState.hidden.size && !layerState.locked.size) return out;
+  for (const it of items) if (!layerUsable(it)) (out || (out = new Set())).add(it.id);
+  return out;
+}
+
+/** 화면에 안 보이는 객체 id: 접힌 포스트잇 위에 쓴 필기 + 숨긴 레이어의 객체 */
 export function foldHidden(items) {
   let hidden = null;
+  if (layerState.hidden.size) for (const it of items) if (layerHidden(it)) (hidden || (hidden = new Set())).add(it.id);
   for (const it of items) {
     if (it.t !== 'nt' || !it.fold) continue;
     if (!hidden) hidden = new Set();
@@ -469,8 +511,8 @@ function roundRectPath(ctx, x, y, w, h, r) {
 }
 
 // ── 표 ──
-// 표·체크리스트 위쪽 바깥에 붙은 어두운 손잡이 띠: 잡고 끌면 이동, 오른쪽 끝 × 를 탭하면 삭제 (포스트잇 띠와 같은 방식)
-export function objBarH(it) { return Math.max(12, Math.min(22, it.fs * 1.6)); }
+// 표·체크리스트·그림 위쪽 바깥에 붙은 어두운 손잡이 띠: 잡고 끌면 이동, 오른쪽 끝 × 를 탭하면 삭제 (포스트잇 띠와 같은 방식)
+export function objBarH(it) { return it.fs ? Math.max(12, Math.min(22, it.fs * 1.6)) : 18; } // 그림은 글자 크기가 없어 고정
 export function objBar(it) { const h = objBarH(it); return { x: it.x, y: it.y - h, w: it.w, h }; }
 /** 삭제(×) 버튼: 띠 오른쪽 끝 정사각형 */
 export function objDeleteButton(it) { const b = objBar(it), s = Math.min(b.h * 1.3, it.w * 0.3); return { x: b.x + b.w - s, y: b.y, w: s, h: b.h }; }
@@ -737,6 +779,13 @@ function cleanRt(rt) {
 
 /** 저장소에서 읽은 객체 검증. 잘못된 객체는 null */
 export function sanitizeItem(raw) {
+  const it = sanitizeItem0(raw);
+  // 레이어 id 유지
+  if (it && typeof raw.ly === 'string' && /^L\w{1,40}$/.test(raw.ly) && raw.ly !== DEFAULT_LAYER) it.ly = raw.ly;
+  return it;
+}
+
+function sanitizeItem0(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.t !== 'string') return null;
   const id = typeof raw.id === 'string' ? raw.id : uid('x');
   const c = typeof raw.c === 'string' && COLOR_RE.test(raw.c) ? raw.c : '#111111';

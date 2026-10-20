@@ -10,7 +10,7 @@
 //    → 이동/확대 중에는 GPU 변환만 일어나므로 끊김이 적고, 멈추면 선명하게 다시 그린다.
 //  - 필기는 화면 크기의 캔버스(형광펜 레이어 / 펜 레이어)에 벡터로 매 프레임 다시 그린다 → 어떤 배율에서도 선명.
 import { Emitter, clamp, rectsIntersect } from './util.js';
-import { drawItem, isHighlighter, bbox, foldHidden } from './ink.js';
+import { drawItem, isHighlighter, bbox, foldHidden, layerSorted, onTopLayer } from './ink.js';
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
@@ -567,7 +567,7 @@ export class Viewer extends Emitter {
     if (!this.doc) return;
     const sel = this.selection;
     for (const p of this.visiblePages(0.05)) {
-      const items = this.doc.items(p.index);
+      const items = layerSorted(this.doc.items(p.index)); // 레이어 순서대로
       if (!items.length) continue;
       // 화면에 보이는 페이지 영역 (페이지 좌표)
       const w0 = this.toWorld(0, 0), w1 = this.toWorld(this.vw, this.vh);
@@ -616,6 +616,7 @@ export class Viewer extends Emitter {
   /** 새 객체 하나만 현재 화면에 덧그린다. 전체 다시 그리기가 필요한 상태면 false */
   appendItem(page, item) {
     if (this._inkFrame || this.selection?.m || this.hidden || this.inkOffset || this.replay) return false;
+    if (!onTopLayer(item)) return false; // 아래 레이어에 넣은 객체는 위 레이어 밑에 그려야 하므로 전체 다시 그림
     const p = this.pages[page];
     if (!p) return false;
     const ctx = isHighlighter(item) ? this.hlCtx : this.inkCtx;

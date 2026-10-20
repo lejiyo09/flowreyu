@@ -3,7 +3,7 @@
 import { settings } from './settings.js';
 import {
   widthBucket, pressureFactor, roundPts, simplifyPts, hitTestSweep, eraseStrokePart,
-  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES, foldHidden, noteAttached,
+  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES, inactiveIds, layerUsable, noteAttached,
 } from './ink.js';
 import { uid, dist, now } from './util.js';
 
@@ -336,7 +336,7 @@ class EraserTool {
     for (const page of pages) {
       const A = this.ctl.toPage(page, ax, ay), B = this.ctl.toPage(page, bx, by);
       const items = doc.items(page);
-      const folded = foldHidden(items); // 접혀서 안 보이는 필기는 지우지 않음
+      const folded = inactiveIds(items); // 접혀서 안 보이는 필기, 숨기거나 잠근 레이어는 지우지 않음
       let out = null;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
@@ -494,7 +494,7 @@ class LassoTool {
       }
       const ids = new Set();
       const all = this.ctl.doc.items(c.page);
-      const folded = foldHidden(all);
+      const folded = inactiveIds(all); // 숨김·잠금 레이어는 선택 안 됨
       for (const it of all) if (!(folded && folded.has(it.id)) && insideLasso(it, c.poly)) ids.add(it.id);
       this.ctl.setSelection({ page: c.page, ids });
       if (!ids.size) this.ctl.app.toast?.('선택된 필기가 없습니다');
@@ -533,7 +533,7 @@ class TextTool {
     const items = this.ctl.doc.items(c.page);
     for (let i = items.length - 1; i >= 0; i--) {
       const it = items[i];
-      if ((it.t === 'tx' || it.t === 'nt' || it.t === 'cl' || it.t === 'tb') && hitTest(it, p.x, p.y, 4)) { this.ctl.app.editText(c.page, it, p.x, p.y); return; }
+      if ((it.t === 'tx' || it.t === 'nt' || it.t === 'cl' || it.t === 'tb') && layerUsable(it) && hitTest(it, p.x, p.y, 4)) { this.ctl.app.editText(c.page, it, p.x, p.y); return; }
     }
     this.ctl.app.editText(c.page, null, p.x, p.y);
   }
@@ -640,7 +640,7 @@ class LinkTool {
       const items = this.ctl.doc.items(c.page);
       for (let i = items.length - 1; i >= 0; i--) {
         const it = items[i];
-        if (it.t === 'ln' && c.x1 >= it.x && c.x1 <= it.x + it.w && c.y1 >= it.y && c.y1 <= it.y + it.h) { this.ctl.app.editLink(c.page, it); return; }
+        if (it.t === 'ln' && layerUsable(it) && c.x1 >= it.x && c.x1 <= it.x + it.w && c.y1 >= it.y && c.y1 <= it.y + it.h) { this.ctl.app.editLink(c.page, it); return; }
       }
       this.ctl.app.toast?.('링크로 만들 영역을 펜으로 끌어서 지정하세요');
       return;

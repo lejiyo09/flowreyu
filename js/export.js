@@ -4,7 +4,7 @@ import {
   moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
   setStrokingRgbColor, setGraphicsState, drawObject,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
-import { strokeRuns, shapePolylines, textLayout, drawItem, bbox, foldHidden, checkHeight } from './ink.js';
+import { strokeRuns, shapePolylines, textLayout, drawItem, bbox, foldHidden, checkHeight, layerSorted } from './ink.js';
 
 function hexToRgb(hex) {
   let h = hex.replace('#', '');
@@ -41,7 +41,7 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     return name;
   };
   for (let i = 0; i < pages.length; i++) {
-    const items = getItems(i);
+    const items = layerSorted(getItems(i)); // 레이어 순서대로 (숨긴 레이어는 아래 foldHidden 에서 빠짐)
     if (!items.length) continue;
     const vt = pageTransforms[i];
     if (!vt) continue;

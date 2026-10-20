@@ -1,5 +1,5 @@
 // 페이지 썸네일 패널: 보이는 썸네일만 지연 렌더링, 필기도 함께 표시
-import { drawItem, isHighlighter, foldHidden } from './ink.js';
+import { drawItem, isHighlighter, foldHidden, layerSorted } from './ink.js';
 import { debounce } from './util.js';
 
 const THUMB_W = 130;
@@ -121,7 +121,7 @@ export class ThumbPanel {
     c.width = base.width; c.height = base.height;
     const ctx = c.getContext('2d');
     ctx.drawImage(base, 0, 0);
-    const items = this.viewer.doc?.items(i) || [];
+    const items = layerSorted(this.viewer.doc?.items(i) || []);
     if (!items.length) return;
     const s = c.width / this.viewer.pages[i].w;
     ctx.setTransform(s, 0, 0, s, 0, 0);

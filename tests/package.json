@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "fixtures": "mkdir -p fixtures && node mkpdf.js fixtures/sample.pdf && node mklinks.js fixtures/links.pdf && node mkimg.js fixtures/img.png && node mkbig.js fixtures/big.pdf",
-    "test": "node ../tools/gen-sw.js --check && node func.js && node spen.js && node pages.js && node links.js && node guides.js && node eraser.js && node gestures.js && node objects.js && node fold.js && node notedrag.js && node checktable.js && node audio.js && node ai.js && node mobile.js && node offline.js && node swupdate.js && node fail.js && node extra.js",
+    "test": "node ../tools/gen-sw.js --check && node func.js && node spen.js && node pages.js && node links.js && node guides.js && node eraser.js && node gestures.js && node objects.js && node fold.js && node notedrag.js && node checktable.js && node layers.js && node audio.js && node ai.js && node mobile.js && node offline.js && node swupdate.js && node fail.js && node extra.js",
     "perf": "node big2.js"
   },
   "devDependencies": {
