@@ -68,7 +68,7 @@ function sse(text, { finish = 'STOP', model = 'gemini-3.8-flash' } = {}) {
   await page.dispatchEvent('#setAiKey', 'change');
   check('key saved locally', (await page.evaluate(() => localStorage.getItem('flexnote.geminiKey'))) === 'AQ.test-key-123');
   check('key not inside settings JSON', !(await page.evaluate(() => localStorage.getItem('flexnote.settings.v1') || '')).includes('AQ.test'));
-  check('model select lists Gemini models', (await page.inputValue('#setAiModel')) === 'gemini-flash-latest' && (await page.locator('#setAiModel option').count()) === 3);
+  check('model select lists Gemini models (3 Flash default)', (await page.inputValue('#setAiModel')) === 'gemini-3-flash-preview' && (await page.locator('#setAiModel option').count()) === 3);
   await page.evaluate(() => document.querySelector('#settingsDlg').close());
 
   // 맞춤법 검사
@@ -79,7 +79,7 @@ function sse(text, { finish = 'STOP', model = 'gemini-3.8-flash' } = {}) {
   await page.waitForSelector('#aiResultActions:not([hidden])', { timeout: 15000 }).catch(() => {});
   const rq = reqs[0];
   check('request sent with api key header (not in URL)', rq && rq.headers['x-goog-api-key'] === 'AQ.test-key-123' && !rq.url.includes('key='), rq?.url);
-  check('flash model, streaming SSE endpoint', /\/models\/gemini-flash-latest:streamGenerateContent\?alt=sse$/.test(rq?.url || ''), rq?.url);
+  check('flash model, streaming SSE endpoint', /\/models\/gemini-3-flash-preview:streamGenerateContent\?alt=sse$/.test(rq?.url || ''), rq?.url);
   check('system instruction + grammar uses low thinking', /교정자/.test(rq?.body.systemInstruction?.parts?.[0]?.text) && rq?.body.generationConfig?.thinkingConfig?.thinkingLevel === 'low');
   const sent = rq?.body.contents?.[0]?.parts?.[0]?.text || '';
   check('pieces packed in order', sent.includes('<<<1>>>\n안녕 하세요. 반갑읍니다.') && sent.includes('<<<2>>>\n우유 사기') && sent.includes('<<<3>>>\n점수'), JSON.stringify(sent));
@@ -157,12 +157,16 @@ function sse(text, { finish = 'STOP', model = 'gemini-3.8-flash' } = {}) {
   check('stop aborts request', (await page.textContent('#aiOut')).includes('중지') && !(await page.locator('#aiRun').isDisabled()));
 
   // 설정 → 생각 깊이
-  await page.evaluate(() => __flexnote.settings.set('ai', { ...__flexnote.settings.get('ai'), effort: 'high', model: 'gemini-pro-latest' }));
+  await page.evaluate(() => __flexnote.settings.set('ai', { ...__flexnote.settings.get('ai'), effort: 'high', model: 'gemini-flash-lite-latest' }));
   mode = 'ok';
   await page.click('#aiTabs button[value=grammar]');
   await page.click('#aiRun');
   await page.waitForSelector('#aiResultActions:not([hidden])', { timeout: 15000 }).catch(() => {});
-  check('model setting applied; high → grammar medium', reqs.at(-1)?.body.generationConfig?.thinkingConfig?.thinkingLevel === 'medium' && reqs.at(-1)?.url.includes('/gemini-pro-latest:'));
+  check('model setting applied; high → grammar medium', reqs.at(-1)?.body.generationConfig?.thinkingConfig?.thinkingLevel === 'medium' && reqs.at(-1)?.url.includes('/gemini-flash-lite-latest:'));
+  await page.evaluate(() => { localStorage.setItem('flexnote.settings.v1', JSON.stringify({ ...JSON.parse(localStorage.getItem('flexnote.settings.v1')), ai: { effort: 'medium', lang: 'en', model: 'gemini-pro-latest' } })); });
+  await page.reload();
+  await page.waitForTimeout(800);
+  check('saved Pro model falls back to Gemini 3 Flash', (await page.evaluate(() => __flexnote.settings.get('ai').model)) === 'gemini-3-flash-preview');
 
   const errs = logs.filter((l) => l.startsWith('[pageerror]'));
   check('no page errors', !errs.length, errs.join('\n'));

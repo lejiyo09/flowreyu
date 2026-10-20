@@ -76,7 +76,7 @@ export const DEFAULTS = {
   text: { color: '#111111', size: 16 },
   note: { color: '#fff59d' }, // 포스트잇 색
   lasso: {},
-  ai: { effort: 'medium', lang: 'en', model: 'gemini-flash-latest' }, // AI 도우미 (API 키는 따로 저장: ai.js)
+  ai: { effort: 'medium', lang: 'en', model: 'gemini-3-flash-preview' }, // AI 도우미 (API 키는 따로 저장: ai.js)
 
   // 제스처 → 동작 (GESTURE_ACTIONS 의 id)
   gestures: {
@@ -143,7 +143,8 @@ function sanitize(s) {
     if (!ok) s.gestures[key] = DEFAULTS.gestures[key];
   }
   if (!['low', 'medium', 'high'].includes(s.ai.effort)) s.ai.effort = 'medium';
-  if (!/^gemini-[\w.-]+$/.test(s.ai.model)) s.ai.model = 'gemini-flash-latest';
+  // 목록에 없는 모델(예전 기본값의 Pro 등)은 기본값으로
+  if (!['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'].includes(s.ai.model)) s.ai.model = DEFAULTS.ai.model;
   if (!['start', 'anytime'].includes(s.holdCondition)) s.holdCondition = 'start';
   if (!['pen', 'hl', 'eraser', 'lasso', 'text', 'shape', 'link'].includes(s.tool)) s.tool = 'pen';
   return s;

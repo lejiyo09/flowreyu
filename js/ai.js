@@ -3,16 +3,16 @@
 // - 사용자가 직접 발급한 Gemini API 키(aistudio.google.com)를 이 기기(localStorage)에만 저장하고,
 //   브라우저에서 generativelanguage.googleapis.com 으로 바로 보낸다. 서버를 거치지 않는다. (공용 기기에서는 쓰지 말 것)
 // - 키를 코드·저장소에 넣지 말 것: GitHub Pages 로 공개되면 누구나 가져다 쓴다.
-// - 모델은 버전 없는 별칭(gemini-flash-latest 등)을 써서 구버전 종료에 영향받지 않게 한다.
+// - 기본 모델은 Gemini 3 Flash. Pro 는 무료 키로 쓸 수 없어(사용량 0) 목록에서 뺐다.
 
 const API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const KEY_STORE = 'flexnote.geminiKey';
 
 /** [id, 이름, 설명] */
 export const AI_MODELS = [
-  ['gemini-flash-latest', 'Gemini Flash (권장)', '무료 키로 사용 가능'],
+  ['gemini-3-flash-preview', 'Gemini 3 Flash (기본)', '무료 키로 사용 가능'],
+  ['gemini-flash-latest', 'Gemini Flash 최신판', '구글이 가리키는 최신 Flash 로 자동 변경'],
   ['gemini-flash-lite-latest', 'Gemini Flash-Lite', '가장 빠르고 저렴, 정확도는 조금 낮음'],
-  ['gemini-pro-latest', 'Gemini Pro', '가장 정확. 무료 키는 사용량 0 — 결제 등록한 키 필요'],
 ];
 
 export const TRANSLATE_LANGS = [
@@ -41,7 +41,7 @@ function httpError(status, body) {
   if (status === 429) {
     const free = /free_tier|FreeTier/i.test(JSON.stringify(body || {}));
     return new AiError('rate', free
-      ? '무료 사용량 한도에 걸렸습니다. 잠시 후 다시 시도하거나, 설정에서 모델을 Gemini Flash 로 바꾸세요 (Pro 는 무료 키로 쓸 수 없음).'
+      ? '무료 사용량 한도에 걸렸습니다. 잠시 후 다시 시도하거나, 설정에서 다른 모델(Flash-Lite 등)로 바꿔 보세요.'
       : '요청이 너무 많거나 사용 한도를 넘었습니다. 잠시 후 다시 시도하세요.');
   }
   if (status === 400) return new AiError('bad', `요청 오류: ${msg || status}`);
