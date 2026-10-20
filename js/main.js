@@ -1269,8 +1269,8 @@ function initLayers(doc) {
 
 /** 레이어 상태를 그리기·도구·저장에 반영 */
 function applyLayers(save = true) {
-  setLayerState(layers);
   if (!layers.some((l) => l.id === activeLayer)) activeLayer = layers[layers.length - 1].id;
+  setLayerState(layers, activeLayer);
   const d = state.doc;
   if (d) d.activeLayer = activeLayer === DEFAULT_LAYER ? null : activeLayer;
   viewer.requestInk();

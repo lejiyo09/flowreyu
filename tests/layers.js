@@ -44,6 +44,15 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   const cross = await S(220, 300), bOnly = await S(220, 350);
   check('upper layer drawn on top (red at crossing)', (await pix(cross))[0] > 180 && (await pix(cross))[1] < 120, JSON.stringify(await pix(cross)));
 
+  // 지우개는 현재 레이어만: 레이어 2 가 현재일 때 레이어 1 의 A 를 문질러도 안 지워짐
+  await page.click('#toolbar [data-tool=eraser]');
+  await page.waitForTimeout(300);
+  const ea = await S(150, 280), eb = await S(150, 320);
+  await h.pen(cdp, h.line(X(ea.x), Y(ea.y), X(eb.x), Y(eb.y), 10));
+  await page.waitForTimeout(250);
+  check('eraser does not erase other (non-current) layer', (await strokes()).some((s) => s.id === A.id));
+  await page.click('#toolbar [data-tool=pen]');
+  await page.waitForTimeout(300);
   // 순서 바꾸기: 레이어 2 를 아래로 → 교차점은 검정
   await page.click('#btnLayers');
   await rowBtn(L2, 'down');

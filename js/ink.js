@@ -313,8 +313,9 @@ export function noteAttached(items, note) {
 // 레이어는 문서 전체 공통. 객체의 ly 가 레이어 id (없으면 기본 레이어 L0). 목록에 없는 레이어(지운 레이어를 실행 취소로 되살린 객체 등)는 맨 아래 레이어로 취급.
 // main.js 가 setLayerState 로 현재 레이어 목록(아래→위 순서)을 알려 주면 그리기 순서·숨김·잠금에 반영된다.
 export const DEFAULT_LAYER = 'L0';
-const layerState = { rank: new Map([[DEFAULT_LAYER, 0]]), hidden: new Set(), locked: new Set(), top: DEFAULT_LAYER, base: DEFAULT_LAYER, multi: false };
-export function setLayerState(layers) {
+const layerState = { rank: new Map([[DEFAULT_LAYER, 0]]), hidden: new Set(), locked: new Set(), top: DEFAULT_LAYER, base: DEFAULT_LAYER, active: DEFAULT_LAYER, multi: false };
+export function setLayerState(layers, active) {
+  layerState.active = active || layers[layers.length - 1]?.id || DEFAULT_LAYER;
   layerState.rank = new Map(layers.map((l, i) => [l.id, i]));
   layerState.hidden = new Set(layers.filter((l) => !l.visible).map((l) => l.id));
   layerState.locked = new Set(layers.filter((l) => l.locked).map((l) => l.id));
@@ -340,11 +341,17 @@ export function layerSorted(items) {
   if (sorted) return items;
   return items.map((it, i) => [layerState.rank.get(layerOf(it)), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[2]);
 }
-/** 지우개·올가미가 건드리면 안 되는 객체 id: 접힌 포스트잇 위 필기 + 숨김·잠금 레이어 */
-export function inactiveIds(items) {
+/**
+ * 지우개·올가미가 건드리면 안 되는 객체 id: 접힌 포스트잇 위 필기 + 숨김·잠금 레이어.
+ * activeOnly: 현재 레이어가 아닌 객체도 제외 (지우개는 현재 레이어만 지운다)
+ */
+export function inactiveIds(items, { activeOnly = false } = {}) {
   let out = foldHidden(items);
-  if (!layerState.hidden.size && !layerState.locked.size) return out;
-  for (const it of items) if (!layerUsable(it)) (out || (out = new Set())).add(it.id);
+  const other = activeOnly && layerState.multi;
+  if (!other && !layerState.hidden.size && !layerState.locked.size) return out;
+  for (const it of items) {
+    if (!layerUsable(it) || (other && layerOf(it) !== layerState.active)) (out || (out = new Set())).add(it.id);
+  }
   return out;
 }
 

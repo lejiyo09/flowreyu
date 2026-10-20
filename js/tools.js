@@ -336,7 +336,7 @@ class EraserTool {
     for (const page of pages) {
       const A = this.ctl.toPage(page, ax, ay), B = this.ctl.toPage(page, bx, by);
       const items = doc.items(page);
-      const folded = inactiveIds(items); // 접혀서 안 보이는 필기, 숨기거나 잠근 레이어는 지우지 않음
+      const folded = inactiveIds(items, { activeOnly: true }); // 현재 레이어만 지운다 (접힌 포스트잇 위 필기·숨김·잠금도 제외)
       let out = null;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
