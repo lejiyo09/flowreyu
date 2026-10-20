@@ -1,0 +1,9 @@
+{
+  "name": "flexnote",
+  "private": true,
+  "description": "FlexNote 태블릿 PDF 필기 웹앱 (빌드 없음). Render: 정적 사이트는 build, 웹 서비스는 start",
+  "scripts": {
+    "build": "node tools/inject-key.js",
+    "start": "node server.js"
+  }
+}

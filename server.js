@@ -3,6 +3,7 @@
 //   node server.js [port]          → http://localhost:8080
 //   node server.js 8080 --lan      → 같은 Wi-Fi 의 태블릿에서 http://<PC IP>:8080 접속 가능
 // .mjs 를 올바른 MIME(text/javascript)으로 보내야 PDF.js 모듈/워커가 로드된다.
+// 배포(Render 웹 서비스 등): 환경 변수 PORT 가 있으면 외부 접속을 받고, GEMINI_API_KEY 가 있으면 js/ai.js 의 내장 키로 넣어 보낸다.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -12,6 +13,7 @@ const args = process.argv.slice(2);
 const port = parseInt(args.find((a) => /^\d+$/.test(a)) || process.env.PORT || '8080', 10);
 const lan = args.includes('--lan');
 const root = __dirname;
+const GEMINI_KEY = /^[\w.-]+$/.test((process.env.GEMINI_API_KEY || '').trim()) ? process.env.GEMINI_API_KEY.trim() : '';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -38,6 +40,12 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(root)) { res.writeHead(403); res.end(); return; }
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); res.end('Not found'); return; }
+    if (GEMINI_KEY && file === path.join(root, 'js', 'ai.js')) {
+      const body = Buffer.from(fs.readFileSync(file, 'utf8').replace(/export const BUILTIN_KEY = '[^']*';/, `export const BUILTIN_KEY = '${GEMINI_KEY}';`));
+      res.writeHead(200, { 'Content-Type': TYPES['.js'], 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+      res.end(body);
+      return;
+    }
     res.writeHead(200, {
       'Content-Type': TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
       'Content-Length': st.size,
@@ -47,7 +55,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(port, lan ? '0.0.0.0' : '127.0.0.1', () => {
+server.listen(port, lan || process.env.PORT ? '0.0.0.0' : '127.0.0.1', () => {
   console.log(`FlexNote: http://localhost:${port}`);
   if (lan) {
     for (const list of Object.values(os.networkInterfaces())) {
