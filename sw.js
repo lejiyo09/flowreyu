@@ -7,7 +7,7 @@
 //   (실행 중에 코드가 섞이지 않도록 자동 교체는 하지 않는다)
 
 // <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)
-const VERSION = '940f8462f8f1';
+const VERSION = 'a974dd2bdf31';
 const PRECACHE = [
   "./",
   "index.html",
@@ -18,6 +18,7 @@ const PRECACHE = [
   "js/debug.js",
   "js/document.js",
   "js/export.js",
+  "js/gallery.js",
   "js/guides.js",
   "js/ink.js",
   "js/input.js",

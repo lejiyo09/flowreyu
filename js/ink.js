@@ -13,6 +13,7 @@
 
 //  check  : {id, t:'cl', x, y, w, fs, c, rows:[{text, done}]}          (체크리스트, 높이는 줄 수로 계산)
 //  table  : {id, t:'tb', x, y, w, h, fs, cells:[[text]]}             (표, 행·열은 cells 크기, 첫 행은 머리글)
+//  filled : {id, t:'fp', c, op?(불투명도), pts:[x,y, x,y, ...]}        (채운 다각형 필기: 크롬북 갤러리에서 가져온 획. gallery.js)
 
 /** 지우개가 건드리지 않는 "개체" 종류 (설정의 "개체도 지우기"로 허용) */
 export const OBJECT_TYPES = new Set(['tx', 'ln', 'im', 'nt', 'cl', 'tb']);
@@ -117,6 +118,15 @@ export function textLayout(item) {
 }
 
 function computeBBox(item) {
+  if (item.t === 'fp') {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    const p = item.pts;
+    for (let i = 0; i < p.length; i += 2) {
+      if (p[i] < minX) minX = p[i]; if (p[i] > maxX) maxX = p[i];
+      if (p[i + 1] < minY) minY = p[i + 1]; if (p[i + 1] > maxY) maxY = p[i + 1];
+    }
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
   if (item.t === 's') {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     const p = item.pts;
@@ -170,6 +180,12 @@ export function itemPath(item) {
       for (let i = 2; i < r.pts.length; i += 2) path.lineTo(r.pts[i], r.pts[i + 1]);
       return { w: r.w, path, dot: r.pts.length === 2 ? [r.pts[0], r.pts[1]] : null };
     });
+  } else if (item.t === 'fp') {
+    const path = new Path2D(), p = item.pts;
+    path.moveTo(p[0], p[1]);
+    for (let i = 2; i < p.length; i += 2) path.lineTo(p[i], p[i + 1]);
+    path.closePath();
+    e.path = path;
   } else if (item.t === 'sh') {
     const path = new Path2D();
     for (const pl of shapePolylines(item)) {
@@ -205,6 +221,12 @@ export function drawItem(ctx, item, opts) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke(itemPath(item));
+  } else if (item.t === 'fp') {
+    ctx.save();
+    ctx.globalAlpha *= item.op ?? 1;
+    ctx.fillStyle = item.c;
+    ctx.fill(itemPath(item));
+    ctx.restore();
   } else if (item.t === 'ln') {
     drawLink(ctx, item);
   } else if (item.t === 'im') {
@@ -640,6 +662,7 @@ export const isHighlighter = (item) => item.t === 's' && item.tool === 'hl';
 export function samplePoints(item) {
   if (item.t === 's') return item.pts.filter((_, i) => i % 3 !== 2);
   if (item.t === 'sh') return shapePolylines(item).flat();
+  if (item.t === 'fp') return item.pts;
   const b = bbox(item);
   return [b.x, b.y, b.x + b.w, b.y, b.x, b.y + b.h, b.x + b.w, b.y + b.h, b.x + b.w / 2, b.y + b.h / 2];
 }
@@ -660,6 +683,15 @@ export function hitTest(item, x, y, r) {
   if (item.t === 'sh') {
     for (const pl of shapePolylines(item)) for (let i = 2; i < pl.length; i += 2) {
       if (distToSegment(x, y, pl[i - 2], pl[i - 1], pl[i], pl[i + 1]) <= r + item.w / 2) return true;
+    }
+  }
+  if (item.t === 'fp') {
+    // 채운 다각형: 안쪽이거나 테두리에서 r 안
+    const p = item.pts;
+    if (pointInPolygon(x, y, p)) return true;
+    for (let i = 0; i < p.length; i += 2) {
+      const j = (i + 2) % p.length;
+      if (distToSegment(x, y, p[i], p[i + 1], p[j], p[j + 1]) <= r) return true;
     }
   }
   return false;
@@ -769,6 +801,7 @@ export function transformItem(item, m) {
     return { ...item, pts, w: item.w * s };
   }
   if (item.t === 'sh') return { ...item, x1: X(item.x1), y1: Y(item.y1), x2: X(item.x2), y2: Y(item.y2), w: item.w * s };
+  if (item.t === 'fp') { const pts = item.pts.map((v, i) => r2(i % 2 ? Y(v) : X(v))); return { ...item, pts }; }
   if (item.t === 'tx') return { ...item, x: X(item.x), y: Y(item.y), fs: item.fs * s };
   if (item.t === 'ln' || item.t === 'im') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s };
   if (item.t === 'nt' || item.t === 'tb') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s, fs: item.fs * s };
@@ -810,6 +843,11 @@ function sanitizeItem0(raw) {
   if (raw.t === 'tx') {
     if (![raw.x, raw.y, raw.fs].every(fin) || typeof raw.text !== 'string') return null;
     return { id, t: 'tx', x: raw.x, y: raw.y, c, fs: raw.fs, text: raw.text, ...cleanRt(raw.rt) };
+  }
+  if (raw.t === 'fp') {
+    if (!Array.isArray(raw.pts) || raw.pts.length < 6 || raw.pts.length % 2 !== 0 || !raw.pts.every(fin)) return null;
+    const op = fin(raw.op) && raw.op > 0 && raw.op < 1 ? { op: raw.op } : {};
+    return { id, t: 'fp', c, ...op, pts: raw.pts, ...cleanRt(raw.rt) };
   }
   if (raw.t === 'im') {
     if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0 || typeof raw.blob !== 'string') return null;

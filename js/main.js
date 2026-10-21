@@ -9,6 +9,7 @@ import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { AudioRecorder, fmtTime } from './audio.js';
 import { Clock, fmtClock, ringSound } from './timer.js';
+import { mightHaveGalleryInk, extractGalleryInk } from './gallery.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
@@ -297,6 +298,35 @@ async function importPdfBytes(bytes, name, extra = {}) {
   return meta.id;
 }
 
+/**
+ * 크롬북 갤러리에서 쓴 필기가 PDF 에 있으면, 물어보고 편집 가능한 필기로 가져온다 (문서마다 처음 열 때 한 번).
+ * 가져오면 갤러리 필기를 지운 PDF 와 (기존 필기 + 가져온 필기)를 한 번에 저장하고 그 PDF 를 돌려준다. 기존 필기는 그대로 둔다.
+ */
+async function importGalleryInk(meta, blob) {
+  const done = async (patch = {}) => { meta.galleryChecked = true; await store.patchDoc(meta.id, { galleryChecked: true, ...patch }).catch(() => {}); };
+  const bytes = await blob.arrayBuffer();
+  if (!mightHaveGalleryInk(bytes)) { await done(); return null; }
+  let res = null;
+  const pdf = await pdfjsLib.getDocument({ ...PDF_OPTS, data: bytes.slice(0) }).promise;
+  try { res = await extractGalleryInk(bytes, async (i) => (await pdf.getPage(i + 1)).getViewport({ scale: 1 }).transform); }
+  catch (e) { console.warn('[gallery] 읽기 실패', e); }
+  finally { pdf.destroy(); }
+  if (!res) { await done(); return null; }
+  if (!confirm(`크롬북 갤러리에서 쓴 필기 ${res.count}개가 있습니다.\n편집할 수 있는 필기로 가져올까요?\n\n가져오면 지우개·올가미로 지우고 옮기고 색을 바꿀 수 있습니다.\n취소하면 지금처럼 PDF 배경의 일부로 남습니다. (이 노트의 기존 필기는 어느 쪽이든 그대로)`)) {
+    await done();
+    return null;
+  }
+  const recs = await store.loadPages(meta.id);
+  const old = new Map(recs.map((r) => [r.page, r]));
+  const records = recs.filter((r) => !res.pages.has(r.page)).map((r) => ({ page: r.page, items: r.items, rev: r.rev || 0 }));
+  for (const [p, items] of res.pages) records.push({ page: p, items: [...(old.get(p)?.items || []), ...items], rev: (old.get(p)?.rev || 0) + 1 });
+  const cleaned = new Blob([res.cleaned], { type: 'application/pdf' });
+  await store.replaceDocStructure(meta.id, cleaned, records, { galleryChecked: true, galleryImported: res.count });
+  meta.galleryChecked = true;
+  setTimeout(() => toast(`갤러리 필기 ${res.count}개를 가져왔습니다 · 이제 지우개·올가미로 편집할 수 있습니다`, { ms: 4000 }), 300);
+  return cleaned;
+}
+
 async function importFile(file) {
   if (!file) return;
   busy(`"${file.name}" 불러오는 중…`);
@@ -378,8 +408,9 @@ async function openDoc(id) {
     await closeDoc();
     const meta = await store.getDoc(id);
     if (!meta) throw new Error('문서를 찾을 수 없습니다');
-    const blob = await store.getFile(id);
+    let blob = await store.getFile(id);
     if (!blob) throw new Error('PDF 원본이 저장소에 없습니다 (브라우저가 데이터를 삭제했을 수 있습니다)');
+    if (!meta.galleryChecked) blob = (await importGalleryInk(meta, blob)) || blob; // 처음 열 때 한 번: 크롬북 갤러리 필기
     const bytes = await blob.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ ...PDF_OPTS, data: bytes }).promise;
     const doc = new NoteDocument(meta);
@@ -520,7 +551,7 @@ async function exportPdf() {
     }
     const { exportAnnotatedPdf } = await import('./export.js');
     const bytes = await exportAnnotatedPdf(await state.blob.arrayBuffer(), viewer.pages.map((p) => p.vt), (i) => doc.items(i),
-      (i, n) => busy(`PDF 만드는 중… ${i}/${n}`), { getBlob: (id) => store.getBlob(id) });
+      (i, n) => busy(`PDF 만드는 중… ${i}/${n}`), { getBlob: (id) => store.getBlob(id), gallery: !!settings.get('exportGallery') });
     const blob = new Blob([bytes], { type: 'application/pdf' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -529,7 +560,7 @@ async function exportPdf() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    toast('필기가 포함된 PDF를 내보냈습니다');
+    toast(settings.get('exportGallery') ? '필기가 포함된 PDF를 내보냈습니다 (크롬북 갤러리 호환)' : '필기가 포함된 PDF를 내보냈습니다');
   } catch (e) {
     console.error(e);
     toast('내보내기 실패: ' + (e?.message || e), { error: true, ms: 6000 });

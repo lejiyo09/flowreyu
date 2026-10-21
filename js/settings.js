@@ -48,6 +48,7 @@ export const GESTURES = [
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
   glass: false, // 글래스모피즘 디자인 (반투명 패널 + 배경 흐림)
+  exportGallery: false, // PDF 내보내기: 필기를 크롬북 갤러리에서도 편집 가능한 모양으로
   glassClear: 45, // 글래스 투명도 % (0 = 불투명, 90 = 거의 투명)
 
   // S Pen / 펜

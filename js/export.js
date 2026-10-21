@@ -2,8 +2,9 @@
 import {
   PDFDocument, PDFName, PDFString, rgb, pushGraphicsState, popGraphicsState, concatTransformationMatrix,
   moveTo, lineTo, stroke, setLineWidth, setLineCap, setLineJoin, LineCapStyle, LineJoinStyle,
-  setStrokingRgbColor, setGraphicsState, drawObject,
+  setStrokingRgbColor, setGraphicsState, drawObject, setFillingRgbColor, closePath, fill,
 } from '../vendor/pdf-lib/pdf-lib.esm.min.js';
+import { itemPolygons, galleryContent } from './gallery.js';
 import { strokeRuns, shapePolylines, textLayout, drawItem, bbox, foldHidden, checkHeight, layerSorted } from './ink.js';
 
 function hexToRgb(hex) {
@@ -32,12 +33,13 @@ function polylineOps(pts, width) {
  * @param pdfBytes ArrayBuffer 원본 PDF
  * @param pageTransforms Array<number[]> 페이지별 pdf.js viewport(scale 1).transform
  * @param getItems (pageIndex) => items[]
+ * @param opts.gallery true 면 필기(펜·형광펜·도형·채운 도형)를 크롬북 갤러리와 같은 모양으로 써서 갤러리에서도 지우고 고칠 수 있게 한다
  */
-export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onProgress, { getBlob } = {}) {
+export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onProgress, { getBlob, gallery = false } = {}) {
   const pdf = await PDFDocument.load(pdfBytes, { ignoreEncryption: true, updateMetadata: false });
   const pages = pdf.getPages();
   const gs = (page, key, dict) => {
-    const name = page.node.newExtGState('GS', pdf.context.obj(dict));
+    const name = page.node.newExtGState(key === 'g' ? 'FXE' : 'GS', pdf.context.obj(dict)); // 갤러리 모양은 이름도 갤러리(PDFium)처럼
     return name;
   };
   for (let i = 0; i < pages.length; i++) {
@@ -54,7 +56,20 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
     const folded = foldHidden(items); // 접힌 포스트잇 위 필기는 화면처럼 숨김
     const shown = folded ? items.filter((it) => !folded.has(it.id)) : items;
     const ordered = [...shown.filter((it) => it.t === 's' && it.tool === 'hl'), ...shown.filter((it) => !(it.t === 's' && it.tool === 'hl'))];
+    const galleryPolys = [];
+    const alphaGs = new Map();
     for (const it of ordered) {
+      if (gallery && (it.t === 's' || it.t === 'sh' || it.t === 'fp')) { galleryPolys.push(...itemPolygons(it)); continue; }
+      if (it.t === 'fp') {
+        // 채운 도형 필기 (갤러리에서 가져온 획)
+        const op = it.op ?? 1;
+        if (!alphaGs.has(op)) alphaGs.set(op, gs(page, 'a', { Type: 'ExtGState', ca: op, CA: op, BM: 'Normal' }));
+        const [r, g, b] = hexToRgb(it.c);
+        ops.push(pushGraphicsState(), setGraphicsState(alphaGs.get(op)), setFillingRgbColor(r, g, b), moveTo(it.pts[0], it.pts[1]));
+        for (let k = 2; k < it.pts.length; k += 2) ops.push(lineTo(it.pts[k], it.pts[k + 1]));
+        ops.push(closePath(), fill(), popGraphicsState());
+        continue;
+      }
       if (it.t === 'ln') { addLinkAnnot(pdf, pages, page, inv, it); continue; }
       if (it.t === 'tx' || it.t === 'nt' || it.t === 'im' || it.t === 'cl' || it.t === 'tb') {
         // 글상자·포스트잇은 그림으로 렌더링(한글 글꼴 문제 없음), 첨부 그림은 원본 그대로
@@ -73,11 +88,22 @@ export async function exportAnnotatedPdf(pdfBytes, pageTransforms, getItems, onP
       else if (it.t === 'sh') for (const pl of shapePolylines(it)) ops.push(...polylineOps(pl, it.w));
     }
     ops.push(popGraphicsState());
-    page.pushOperators(...ops);
+    page.pushOperators(...ops); // (원본 내용은 pdf-lib 가 q/Q 로 감싸 둔다)
+    if (galleryPolys.length) {
+      // 갤러리 모양: /GOOG:INKIsInker 표시 안에 획마다 테두리 다각형 (좌표는 PDF 사용자 좌표로 직접)
+      const names = new Map();
+      const gsName = (a) => {
+        if (!names.has(a)) names.set(a, gs(page, 'g', a >= 0.999 ? { BM: 'Normal', CA: 1, ca: 1 } : { ca: a }).toString().slice(1));
+        return names.get(a);
+      };
+      const text = galleryContent(galleryPolys, inv, gsName);
+      page.node.addContentStream(pdf.context.register(pdf.context.flateStream(text)));
+    }
     onProgress?.(i + 1, pages.length);
     if (i % 5 === 0) await new Promise((r) => setTimeout(r, 0));
   }
-  return pdf.save({ useObjectStreams: true });
+  // 갤러리 호환은 객체를 압축 묶음(object stream)에 넣지 않는다 (갤러리 저장본과 같은 구조, 다시 열 때 빠르게 알아봄)
+  return pdf.save({ useObjectStreams: !gallery });
 }
 
 /** 사용자 링크 → PDF 링크 주석 (다른 PDF 뷰어에서도 눌러서 이동) */
