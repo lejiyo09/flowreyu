@@ -141,17 +141,98 @@ function updateGlassInset() {
 // ───────────────────────────── 라이브러리 ─────────────────────────────
 
 let libEditing = false;
+let curFolder = null; // 지금 보고 있는 폴더 id (null = 홈)
+let folders = []; // [{id, name, parent}] — kv 'folders' 에 저장
+
+async function loadFolders() {
+  const f = await store.kvGet('folders').catch(() => null);
+  folders = Array.isArray(f) ? f.filter((x) => x && typeof x.id === 'string' && typeof x.name === 'string') : [];
+}
+const saveFolders = () => store.kvSet('folders', folders);
+const folderById = (id) => folders.find((f) => f.id === id) || null;
+/** 폴더 경로 (홈 → … → id) */
+function folderPath(id) {
+  const out = [];
+  for (let f = folderById(id), n = 0; f && n < 50; f = folderById(f.parent), n++) out.unshift(f);
+  return out;
+}
+/** 노트·폴더가 속한 폴더 (지워진 폴더를 가리키면 홈) */
+const docFolder = (d) => (d.folder && folderById(d.folder) ? d.folder : null);
+const parentOf = (f) => (f.parent && folderById(f.parent) ? f.parent : null);
+
+/** 길게 누르기(손가락·펜)·우클릭 → 메뉴. 돌려주는 함수는 click 에서 "방금 길게 눌렀는지" 확인용 */
+function bindCardMenu(card, openMenu) {
+  let pressed = null;
+  card.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || e.target.closest('button')) return;
+    const x = e.clientX, y = e.clientY;
+    pressed = { x, y, timer: setTimeout(() => { pressed.fired = true; openMenu({ x, y }); }, 550) };
+  });
+  card.addEventListener('pointermove', (e) => { if (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 10) { clearTimeout(pressed.timer); pressed = null; } });
+  card.addEventListener('pointerup', () => { if (pressed) clearTimeout(pressed.timer); });
+  card.addEventListener('pointercancel', () => { if (pressed) clearTimeout(pressed.timer); pressed = null; });
+  card.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!pressed?.fired) openMenu({ x: e.clientX, y: e.clientY }); });
+  return () => { const fired = !!pressed?.fired; pressed = null; return fired; };
+}
 
 async function renderLibrary() {
   let docs = [];
   try { docs = await store.listDocs(); }
   catch (e) { toast('저장소를 열 수 없습니다: ' + store.describeError(e), { error: true, ms: 6000 }); }
+  await loadFolders();
+  if (curFolder && !folderById(curFolder)) curFolder = null;
   const last = await store.kvGet('lastDoc').catch(() => null);
   const grid = $('#docGrid');
   grid.innerHTML = '';
-  $('#libEmpty').hidden = docs.length > 0;
-  if (!docs.length && libEditing) setLibEditing(false);
-  for (const d of docs) {
+  // 경로 표시: 홈 › 폴더 › 하위 폴더
+  const crumbs = $('#libCrumbs');
+  crumbs.hidden = !curFolder;
+  crumbs.innerHTML = '';
+  if (curFolder) {
+    const parts = [{ id: null, name: '홈' }, ...folderPath(curFolder)];
+    parts.forEach((f, k) => {
+      if (k) crumbs.insertAdjacentHTML('beforeend', '<span class="sep">›</span>');
+      const b = document.createElement('button');
+      b.textContent = f.name;
+      b.className = k === parts.length - 1 ? 'cur' : '';
+      b.addEventListener('click', () => openFolder(f.id));
+      crumbs.appendChild(b);
+    });
+  }
+  const subFolders = folders.filter((f) => parentOf(f) === curFolder).sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  const here = docs.filter((d) => docFolder(d) === curFolder);
+  const empty = !subFolders.length && !here.length;
+  $('#libEmpty').hidden = !empty;
+  $('#libEmpty p').textContent = curFolder ? '이 폴더는 비어 있습니다. PDF를 열거나 새 노트를 만들면 이 폴더에 들어갑니다.' : 'PDF를 열거나 새 노트를 만들어 시작하세요.';
+  if (!docs.length && !folders.length && libEditing) setLibEditing(false);
+
+  for (const f of subFolders) {
+    const nDocs = docs.filter((d) => docFolder(d) === f.id).length;
+    const nSub = folders.filter((x) => parentOf(x) === f.id).length;
+    const card = document.createElement('div');
+    card.className = 'doc-card folder-card';
+    card.dataset.folder = f.id;
+    card.innerHTML = `
+      <div class="cover"><svg><use href="#i-folder"/></svg></div>
+      <button class="more" data-ui title="메뉴"><svg><use href="#i-more"/></svg></button>
+      <div class="card-actions">
+        <button data-a="rename">✎ 이름</button><button data-a="move">↪ 이동</button><button data-a="del" class="danger">삭제</button>
+      </div>
+      <div class="name">${escapeHtml(f.name)}</div>
+      <div class="meta">노트 ${nDocs}개${nSub ? ` · 폴더 ${nSub}개` : ''}</div>`;
+    const longPressed = bindCardMenu(card, (at) => folderMenu(at, f));
+    card.addEventListener('click', (e) => {
+      if (longPressed()) return;
+      const act = e.target.closest('.card-actions button');
+      if (act) { e.stopPropagation(); folderAction(act.dataset.a, f); return; }
+      if (e.target.closest('.more')) { e.stopPropagation(); const r = e.target.closest('.more').getBoundingClientRect(); folderMenu({ x: r.right - 160, y: r.bottom + 4 }, f); return; }
+      if (libEditing) { folderAction('rename', f); return; }
+      openFolder(f.id);
+    });
+    grid.appendChild(card);
+  }
+
+  for (const d of here) {
     const card = document.createElement('div');
     card.className = 'doc-card';
     card.dataset.id = d.id;
@@ -160,24 +241,13 @@ async function renderLibrary() {
       ${d.id === last ? '<span class="last-badge">최근</span>' : ''}
       <button class="more" data-ui title="메뉴"><svg><use href="#i-more"/></svg></button>
       <div class="card-actions">
-        <button data-a="rename">✎ 이름</button><button data-a="dup">⧉ 사본</button><button data-a="del" class="danger">삭제</button>
+        <button data-a="rename">✎ 이름</button><button data-a="move">↪ 이동</button><button data-a="dup">⧉ 사본</button><button data-a="del" class="danger">삭제</button>
       </div>
       <div class="name">${escapeHtml(d.name)}</div>
       <div class="meta">${d.pageCount || '?'}쪽 · ${formatDate(d.updated || d.created)}</div>`;
-    let pressed = null; // 길게 누르기 (손가락·펜)
-    card.addEventListener('pointerdown', (e) => {
-      if (e.pointerType === 'mouse' || e.target.closest('button')) return;
-      const x = e.clientX, y = e.clientY;
-      pressed = { x, y, timer: setTimeout(() => { pressed.fired = true; cardMenu({ x, y }, d); }, 550) };
-    });
-    card.addEventListener('pointermove', (e) => { if (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 10) { clearTimeout(pressed.timer); pressed = null; } });
-    const release = () => { if (pressed) clearTimeout(pressed.timer); };
-    card.addEventListener('pointerup', release);
-    card.addEventListener('pointercancel', () => { release(); pressed = null; });
-    card.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!pressed?.fired) cardMenu({ x: e.clientX, y: e.clientY }, d); });
+    const longPressed = bindCardMenu(card, (at) => cardMenu(at, d));
     card.addEventListener('click', (e) => {
-      if (pressed?.fired) { pressed = null; return; } // 길게 누른 뒤 손을 뗀 것은 열기 아님
-      pressed = null;
+      if (longPressed()) return; // 길게 누른 뒤 손을 뗀 것은 열기 아님
       const act = e.target.closest('.card-actions button');
       if (act) { e.stopPropagation(); cardAction(act.dataset.a, d); return; }
       if (e.target.closest('.more')) { e.stopPropagation(); const r = e.target.closest('.more').getBoundingClientRect(); cardMenu({ x: r.right - 160, y: r.bottom + 4 }, d); return; }
@@ -189,6 +259,109 @@ async function renderLibrary() {
   const info = await store.storageInfo();
   $('#storageLine').textContent = `저장소 사용량 ${formatBytes(info.usage)} / ${formatBytes(info.quota)}` +
     (info.persisted === true ? ' · 영구 저장 허용됨' : info.persisted === false ? ' · 영구 저장 미허용(브라우저가 공간 부족 시 삭제할 수 있음)' : '');
+}
+
+function openFolder(id) {
+  curFolder = id;
+  store.kvSet('libFolder', id).catch(() => {});
+  renderLibrary();
+}
+
+// ── 폴더 ──
+$('#btnNewFolder').addEventListener('click', async () => {
+  const name = prompt('새 폴더 이름', '새 폴더');
+  if (!name || !name.trim()) return;
+  await loadFolders();
+  folders.push({ id: uid('f'), name: name.trim().slice(0, 80), parent: curFolder, created: Date.now() });
+  await saveFolders();
+  renderLibrary();
+});
+
+function popMenu(at, html, onPick) {
+  document.querySelector('.card-menu')?.remove();
+  const m = document.createElement('div');
+  m.className = 'card-menu';
+  m.dataset.ui = '';
+  m.innerHTML = html;
+  document.body.appendChild(m);
+  m.style.left = clamp(at.x, 8, innerWidth - 170) + 'px';
+  m.style.top = clamp(at.y, 8, innerHeight - 230) + 'px';
+  const close = () => { m.remove(); document.removeEventListener('pointerdown', outside, true); };
+  const outside = (ev) => { if (!m.contains(ev.target)) close(); };
+  setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
+  m.addEventListener('click', (ev) => {
+    const a = ev.target.closest('button')?.dataset.a;
+    if (!a) return;
+    close();
+    onPick(a);
+  });
+}
+function folderMenu(at, f) {
+  popMenu(at, '<button data-a="open">열기</button><button data-a="rename">이름 바꾸기</button><button data-a="move">다른 폴더로 이동</button><button data-a="del" class="danger">폴더 삭제</button>', (a) => folderAction(a, f));
+}
+async function folderAction(a, f) {
+  if (a === 'open') openFolder(f.id);
+  else if (a === 'rename') {
+    const name = prompt('폴더 이름', f.name);
+    if (!name || !name.trim()) return;
+    await loadFolders();
+    const x = folderById(f.id);
+    if (x) { x.name = name.trim().slice(0, 80); await saveFolders(); }
+    renderLibrary();
+  } else if (a === 'move') {
+    const dest = await pickFolder(`"${f.name}" 폴더를 어디로 옮길까요?`, f.id);
+    if (dest === undefined) return;
+    await loadFolders();
+    const x = folderById(f.id);
+    if (x) { x.parent = dest; await saveFolders(); toast(`"${f.name}" → ${dest ? folderById(dest).name : '홈'}`); }
+    renderLibrary();
+  } else if (a === 'del') {
+    const docs = await store.listDocs();
+    const nDocs = docs.filter((d) => docFolder(d) === f.id).length;
+    const nSub = folders.filter((x) => parentOf(x) === f.id).length;
+    const up = parentOf(f);
+    const where = up ? `"${folderById(up).name}" 폴더` : '홈';
+    if (!confirm(`"${f.name}" 폴더를 삭제할까요?${nDocs || nSub ? `\n안의 노트 ${nDocs}개${nSub ? `와 폴더 ${nSub}개` : ''}는 지우지 않고 ${where}(으)로 옮깁니다.` : ''}`)) return;
+    for (const d of docs) if (docFolder(d) === f.id) await store.patchDoc(d.id, { folder: up });
+    await loadFolders();
+    for (const x of folders) if (x.parent === f.id) x.parent = up;
+    folders = folders.filter((x) => x.id !== f.id);
+    await saveFolders();
+    toast('폴더를 삭제했습니다');
+    renderLibrary();
+  }
+}
+
+/**
+ * 폴더 고르기 대화상자. 고른 폴더 id (홈은 null), 취소하면 undefined.
+ * exclude: 옮기는 폴더 자신 (자기·하위 폴더로는 못 옮김)
+ */
+function pickFolder(title, exclude = null) {
+  return new Promise((resolve) => {
+    const dlg = $('#moveDlg');
+    $('#moveTitle').textContent = title;
+    const list = $('#moveList');
+    list.innerHTML = '';
+    const banned = new Set();
+    if (exclude) { banned.add(exclude); let grew = true; while (grew) { grew = false; for (const f of folders) if (!banned.has(f.id) && banned.has(f.parent)) { banned.add(f.id); grew = true; } } }
+    const add = (id, name, depth) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'move-item' + (id === curFolder ? ' cur' : '');
+      b.style.paddingLeft = 12 + depth * 18 + 'px';
+      b.innerHTML = `<svg><use href="#${id ? 'i-folder' : 'i-home'}"/></svg><span>${escapeHtml(name)}</span>`;
+      b.addEventListener('click', () => { done = true; dlg.close(); resolve(id); });
+      list.appendChild(b);
+    };
+    add(null, '홈 (맨 위)', 0);
+    const walk = (parent, depth) => {
+      for (const f of folders.filter((x) => parentOf(x) === parent && !banned.has(x.id)).sort((a, b) => a.name.localeCompare(b.name, 'ko'))) { add(f.id, f.name, depth); walk(f.id, depth + 1); }
+    };
+    walk(null, 1);
+    let done = false;
+    dlg.addEventListener('close', () => { if (!done) resolve(undefined); }, { once: true });
+    dlg.showModal();
+  });
 }
 
 /** 홈 편집 모드: 카드마다 이름 바꾸기·사본·삭제 버튼을 보여 준다 */
@@ -205,7 +378,7 @@ function cardMenu(at, d) {
   const m = document.createElement('div');
   m.className = 'card-menu';
   m.dataset.ui = '';
-  m.innerHTML = '<button data-a="open">열기</button><button data-a="rename">이름 바꾸기</button><button data-a="dup">사본 만들기</button><button data-a="del" class="danger">삭제</button>';
+  m.innerHTML = '<button data-a="open">열기</button><button data-a="rename">이름 바꾸기</button><button data-a="move">폴더로 이동</button><button data-a="dup">사본 만들기</button><button data-a="del" class="danger">삭제</button>';
   document.body.appendChild(m);
   m.style.left = clamp(at.x, 8, innerWidth - 170) + 'px';
   m.style.top = clamp(at.y, 8, innerHeight - 190) + 'px';
@@ -234,6 +407,14 @@ async function renameDoc(id, cur) {
 async function cardAction(a, d) {
   if (a === 'open') openDoc(d.id);
   else if (a === 'rename') { if (await renameDoc(d.id, d.name)) renderLibrary(); }
+  else if (a === 'move') {
+    await loadFolders();
+    const dest = await pickFolder(`"${d.name}"을(를) 어느 폴더로 옮길까요?`);
+    if (dest === undefined) return;
+    await store.patchDoc(d.id, { folder: dest });
+    toast(`"${d.name}" → ${dest ? folderById(dest).name : '홈'}`);
+    renderLibrary();
+  }
   else if (a === 'dup') {
     busy('사본 만드는 중…');
     try {
@@ -290,7 +471,7 @@ async function importPdfBytes(bytes, name, extra = {}) {
   const thumb = await makeThumb(pdf);
   const meta = {
     id: uid('d'), name, size: bytes.byteLength, pageCount: pdf.numPages,
-    created: Date.now(), updated: Date.now(), opened: Date.now(), thumb, view: null, ...extra,
+    created: Date.now(), updated: Date.now(), opened: Date.now(), thumb, view: null, folder: curFolder, ...extra, // 지금 보고 있는 폴더에 넣기
   };
   await pdf.destroy();
   await store.addDocWithFile(meta, new Blob([bytes], { type: 'application/pdf' }));
@@ -2440,6 +2621,7 @@ async function boot() {
       setTimeout(() => toast('펜이 없다면 아래 도구 모음의 ✋(손가락으로 쓰기)를 켜세요', { ms: 5000 }), 1500);
     }
   } catch { /* */ }
+  curFolder = (await store.kvGet('libFolder').catch(() => null)) || null; // 마지막으로 보던 폴더
   const last = await store.kvGet('lastDoc').catch(() => null);
   if (last && (await store.getDoc(last).catch(() => null))) await openDoc(last);
   else { showScreen('library'); renderLibrary(); }

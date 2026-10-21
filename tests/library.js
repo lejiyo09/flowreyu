@@ -64,7 +64,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   const cardOrig = page.locator(`.doc-card[data-id="${orig.id}"]`);
   await cardOrig.click({ button: 'right' });
   await page.waitForTimeout(200);
-  check('right-click opens card menu', await page.locator('.card-menu').isVisible() && (await page.locator('.card-menu button').count()) === 4);
+  check('right-click opens card menu', await page.locator('.card-menu').isVisible() && (await page.locator('.card-menu button').count()) === 5);
   await page.click('.card-menu [data-a=del]');
   await page.waitForTimeout(600);
   check('delete original', (await names()).length === 1);
