@@ -82,6 +82,19 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   // 위쪽 바도 유리: 페이지 위에 떠 있고(absolute) 뷰어는 바 높이만큼 아래에서 시작
   const tb = await page.evaluate(() => { const t = document.querySelector('#editor > .topbar'); const s = getComputedStyle(t); return { pos: s.position, bf: s.backdropFilter || s.webkitBackdropFilter, h: t.offsetHeight, inset: __flexnote.viewer.insetTop }; });
   check('glass top bar floats over pages with blur', tb.pos === 'absolute' && /blur/.test(tb.bf) && tb.inset === tb.h && tb.h > 0, JSON.stringify(tb));
+  // 투명도 조절: 설정 슬라이더 → 패널 배경 알파
+  const bgA = () => page.evaluate(() => { const m = getComputedStyle(document.querySelector('#toolbar')).backgroundColor.match(/rgba?\(([^)]+)\)/); return m ? +(m[1].split(',')[3] ?? 1) : -1; });
+  check('default transparency 45% → alpha 0.55', Math.abs((await bgA()) - 0.55) < 0.02, String(await bgA()));
+  await page.click('#btnSettings');
+  await page.waitForTimeout(200);
+  check('transparency slider in settings', await page.locator('[data-setting=glassClear]').isVisible() && /45%/.test(await page.textContent('[data-out=glassClear]')));
+  await page.locator('[data-setting=glassClear]').fill('80');
+  await page.waitForTimeout(100);
+  check('slider 80% → more see-through (alpha 0.2)', Math.abs((await bgA()) - 0.2) < 0.02 && /80%/.test(await page.textContent('[data-out=glassClear]')), String(await bgA()));
+  await page.evaluate(() => document.querySelector('#settingsDlg').close());
+  await page.evaluate(() => __flexnote.settings.set('theme', 'dark'));
+  check('dark theme keeps text readable (alpha 0.6 at 80%)', Math.abs((await bgA()) - 0.6) < 0.02, String(await bgA()));
+  await page.evaluate(() => { __flexnote.settings.set('theme', 'system'); __flexnote.settings.set('glassClear', 45); });
   await page.evaluate(() => __flexnote.viewer.goToPage(0));
   const firstTop = await page.evaluate(() => __flexnote.viewer.pageToScreen(0, 0, 0).y);
   check('first page starts below the glass bar', firstTop >= tb.h, String(firstTop));

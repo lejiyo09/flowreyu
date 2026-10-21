@@ -53,6 +53,9 @@ function applyTheme() {
   const dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   document.documentElement.classList.toggle('glass', !!settings.get('glass'));
+  // 투명도 t% → 패널 불투명도. 다크는 흰 PDF 위에서 글자가 읽히도록 절반만 투명해진다 (기본 45% → 라이트 0.55, 다크 0.78)
+  const t = settings.get('glassClear') / 100;
+  document.documentElement.style.setProperty('--glass-a', (dark ? 1 - t * 0.5 : 1 - t).toFixed(3));
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 applyTheme();
@@ -2242,7 +2245,7 @@ function syncSettingsForm() {
     else if (el.type === 'checkbox') el.checked = !!v;
     else el.value = v;
   }
-  const fmt = { smoothing: (v) => v, holdMs: (v) => `${v}ms`, holdTolerance: (v) => `${v}px`, palmSize: (v) => `${v}px`, penGuardMs: (v) => `${v}ms` };
+  const fmt = { smoothing: (v) => v, holdMs: (v) => `${v}ms`, holdTolerance: (v) => `${v}px`, palmSize: (v) => `${v}px`, penGuardMs: (v) => `${v}ms`, glassClear: (v) => `${v}%` };
   for (const o of dlg.querySelectorAll('[data-out]')) o.textContent = fmt[o.dataset.out](settings.get(o.dataset.out));
 }
 for (const el of dlg.querySelectorAll('[data-setting]')) {
@@ -2320,7 +2323,7 @@ $('#backupInput').addEventListener('change', async (e) => {
 });
 
 settings.on('change', ({ path }) => {
-  if (path === 'theme' || path === 'glass' || path === '*') { applyTheme(); updateGlassInset(); }
+  if (path === 'theme' || path === 'glass' || path === 'glassClear' || path === '*') { applyTheme(); updateGlassInset(); }
   if (path === 'debug' || path === '*') { dbg.enable(settings.get('debug')); $('#btnDebug').hidden = !settings.get('debug'); }
   if (path === 'tool' || path === '*') renderToolbar();
 });

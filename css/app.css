@@ -448,16 +448,18 @@ input[type=range] { accent-color: var(--accent); }
 /* ── 글래스모피즘 (설정 → 화면 → 글래스 디자인) ──
    반투명 패널 + 뒤 배경 흐림. 화면 위에 떠 있는 도구 모음·패널만 흐림 처리해서 필기 성능 영향을 줄인다. */
 :root.glass {
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
+  /* --glass-a: 패널 불투명도 (설정 → 글래스 투명도로 조절, main.js applyTheme 이 넣음) */
+  --glass-a: 0.55;
+  --glass-bg: rgba(255, 255, 255, var(--glass-a));
+  --glass-bg-strong: rgba(255, 255, 255, calc(var(--glass-a) + 0.17));
   --glass-line: rgba(255, 255, 255, 0.65);
   --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.6);
   --surface-2: rgba(255, 255, 255, 0.45);
   --line: rgba(120, 130, 160, 0.25);
 }
 :root.glass[data-theme="dark"] {
-  --glass-bg: rgba(26, 30, 40, 0.78); /* 흰 PDF 위에서도 글자가 읽히도록 라이트보다 진하게 */
-  --glass-bg-strong: rgba(26, 30, 40, 0.86);
+  --glass-bg: rgba(26, 30, 40, var(--glass-a)); /* 다크는 흰 PDF 위에서도 글자가 읽히도록 같은 투명도에서 더 진하게 (applyTheme) */
+  --glass-bg-strong: rgba(26, 30, 40, calc(var(--glass-a) + 0.08));
   --glass-line: rgba(255, 255, 255, 0.14);
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   --surface-2: rgba(255, 255, 255, 0.07);

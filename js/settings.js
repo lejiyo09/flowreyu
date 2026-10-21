@@ -48,6 +48,7 @@ export const GESTURES = [
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
   glass: false, // 글래스모피즘 디자인 (반투명 패널 + 배경 흐림)
+  glassClear: 45, // 글래스 투명도 % (0 = 불투명, 90 = 거의 투명)
 
   // S Pen / 펜
   penHoverButton: true, // 호버 중 버튼 입력(buttons=2)도 메뉴로 처리
@@ -146,6 +147,8 @@ function sanitize(s) {
   s.shape.width = clamp(+s.shape.width || 2, 0.3, 30);
   s.text.size = clamp(+s.text.size || 16, 6, 120);
   if (!['system', 'light', 'dark'].includes(s.theme)) s.theme = 'system';
+  s.glassClear = clamp(Math.round(+s.glassClear), 0, 90);
+  if (!Number.isFinite(s.glassClear)) s.glassClear = DEFAULTS.glassClear;
   const ids = new Set(GESTURE_ACTIONS.map(([id]) => id));
   for (const [key, , , extra] of GESTURES) {
     const ok = ids.has(s.gestures[key]) || extra.some(([id]) => id === s.gestures[key]);
