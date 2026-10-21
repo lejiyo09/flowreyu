@@ -25,9 +25,11 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.click('#docTitle');
   await page.waitForTimeout(300);
   check('tapping editor title renames the note', (await page.textContent('#docTitle')) === '회의 노트');
+  check('window title is FlexNote-<note name>', (await page.title()) === 'FlexNote-회의 노트', await page.title());
   await page.click('#btnBack');
   await page.waitForSelector('#library:not([hidden])');
   await page.waitForTimeout(500);
+  check('window title back to FlexNote on home', (await page.title()) === 'FlexNote', await page.title());
   const names = () => page.$$eval('#docGrid .doc-card .name', (els) => els.map((e) => e.textContent));
   check('library shows renamed note', (await names()).includes('회의 노트'), JSON.stringify(await names()));
 

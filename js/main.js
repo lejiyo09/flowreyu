@@ -225,7 +225,7 @@ async function renameDoc(id, cur) {
   if (!name || !name.trim() || name.trim() === cur) return null;
   const n = name.trim().slice(0, 120);
   await store.patchDoc(id, { name: n });
-  if (state.doc?.id === id) { state.doc.meta.name = n; $('#docTitle').textContent = n; }
+  if (state.doc?.id === id) { state.doc.meta.name = n; $('#docTitle').textContent = n; updatePageTitle(); }
   toast('이름을 바꿨습니다');
   return n;
 }
@@ -257,6 +257,13 @@ function showScreen(name) {
   $('#library').hidden = name !== 'library';
   $('#editor').hidden = name !== 'editor';
   if (name === 'editor') { viewer.resize(true); updateGlassInset(); }
+  updatePageTitle();
+}
+
+/** 브라우저 탭·앱 창 제목: 노트를 열면 "FlexNote-노트제목", 아니면 "FlexNote" */
+function updatePageTitle() {
+  const name = state.screen === 'editor' && state.doc?.meta.name;
+  document.title = name ? `FlexNote-${name}` : 'FlexNote';
 }
 
 // ───────────────────────────── 가져오기 ─────────────────────────────
