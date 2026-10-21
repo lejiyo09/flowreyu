@@ -162,6 +162,37 @@ export async function getBlob(id) {
   return req2p(tx.objectStore('blobs').get(id));
 }
 
+/**
+ * 노트 사본 만들기: 메타·PDF·필기·첨부(그림·녹음)를 한 트랜잭션으로 복사한다.
+ * 첨부는 새 id 로 복사하고 필기 안의 참조(그림 blob, 녹음 rt.rec)도 새 id 로 바꾼다 (원본을 지워도 사본이 멀쩡하도록).
+ * newBlobId(rec) → 새 첨부 id. 원본이 없으면 null.
+ */
+export async function duplicateDoc(id, newId, name, newBlobId) {
+  const tx = await store(['docs', 'files', 'pages', 'blobs'], 'readwrite');
+  const ds = tx.objectStore('docs'), fs = tx.objectStore('files'), ps = tx.objectStore('pages'), bs = tx.objectStore('blobs');
+  const meta = await req2p(ds.get(id));
+  const file = await req2p(fs.get(id));
+  if (!meta || !file) { tx.abort(); return null; }
+  const pages = await req2p(ps.index('byDoc').getAll(IDBKeyRange.only(id)));
+  const blobs = await req2p(bs.index('byDoc').getAll(IDBKeyRange.only(id)));
+  const map = new Map(blobs.map((b) => [b.id, newBlobId(b)]));
+  const t = Date.now();
+  ds.put({ ...meta, id: newId, name, created: t, updated: t, opened: 0 });
+  fs.put({ ...file, id: newId });
+  for (const b of blobs) bs.put({ ...b, id: map.get(b.id), docId: newId });
+  for (const p of pages) {
+    const items = p.items.map((it) => {
+      let out = it;
+      if (it.blob && map.has(it.blob)) out = { ...out, blob: map.get(it.blob) };
+      if (it.rt?.rec && map.has(it.rt.rec)) out = { ...out, rt: { ...it.rt, rec: map.get(it.rt.rec) } };
+      return out;
+    });
+    ps.put({ ...p, docId: newId, items });
+  }
+  await tx2p(tx);
+  return newId;
+}
+
 export async function deleteDoc(id) {
   const tx = await store(['docs', 'files', 'pages', 'kv', 'blobs'], 'readwrite');
   const bkeys = await req2p(tx.objectStore('blobs').index('byDoc').getAllKeys(IDBKeyRange.only(id)));

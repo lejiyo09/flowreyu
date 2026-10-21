@@ -355,6 +355,7 @@ input[type=range] { accent-color: var(--accent); }
   .brand span { font-size: 18px; }
   .lib-actions { gap: 4px; }
   .lib-actions .btn:not(.primary) span { display: none; }
+  #btnLibEdit span { display: none; } /* 휴대폰: 편집 버튼은 아이콘만 (켜지면 파란색) */
   .lib-actions .btn { padding: 0 10px; }
   .doc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px 12px; }
 
@@ -492,3 +493,11 @@ input[type=range] { accent-color: var(--accent); }
 :root.glass #editor > .topbar { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--glass-line); box-shadow: var(--glass-shadow); }
 :root.glass #editor .thumbs { padding-top: calc(var(--top-h) + env(safe-area-inset-top)); }
 :root.glass #editor .back-chip { top: calc(var(--top-h) + env(safe-area-inset-top) + 12px); }
+.doc-card .card-actions { display: none; position: absolute; left: 6px; right: 6px; top: 18%; gap: 8px; flex-direction: column; align-items: center; z-index: 2; }
+.lib-editing .doc-card .cover img { opacity: 0.45; }
+.doc-card .card-actions button { min-width: 92px; }
+.lib-editing .doc-card .card-actions { display: flex; }
+.lib-editing .doc-card .cover { outline: 2px dashed var(--accent); outline-offset: 3px; }
+.doc-card .card-actions button { border: 1px solid var(--line); background: var(--surface); color: inherit; border-radius: 999px; padding: 6px 10px; font-size: 13px; font-weight: 600; box-shadow: var(--shadow); }
+.doc-card .card-actions button.danger { color: var(--danger); }
+.doc-title[role=button] { cursor: pointer; }

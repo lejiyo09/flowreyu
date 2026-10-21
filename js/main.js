@@ -139,6 +139,8 @@ function updateGlassInset() {
 
 // ───────────────────────────── 라이브러리 ─────────────────────────────
 
+let libEditing = false;
+
 async function renderLibrary() {
   let docs = [];
   try { docs = await store.listDocs(); }
@@ -147,17 +149,38 @@ async function renderLibrary() {
   const grid = $('#docGrid');
   grid.innerHTML = '';
   $('#libEmpty').hidden = docs.length > 0;
+  if (!docs.length && libEditing) setLibEditing(false);
   for (const d of docs) {
     const card = document.createElement('div');
     card.className = 'doc-card';
+    card.dataset.id = d.id;
     card.innerHTML = `
       <div class="cover">${d.thumb ? `<img src="${d.thumb}" alt="">` : '<svg><use href="#i-file"/></svg>'}</div>
       ${d.id === last ? '<span class="last-badge">최근</span>' : ''}
       <button class="more" data-ui title="메뉴"><svg><use href="#i-more"/></svg></button>
+      <div class="card-actions">
+        <button data-a="rename">✎ 이름</button><button data-a="dup">⧉ 사본</button><button data-a="del" class="danger">삭제</button>
+      </div>
       <div class="name">${escapeHtml(d.name)}</div>
       <div class="meta">${d.pageCount || '?'}쪽 · ${formatDate(d.updated || d.created)}</div>`;
+    let pressed = null; // 길게 누르기 (손가락·펜)
+    card.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' || e.target.closest('button')) return;
+      const x = e.clientX, y = e.clientY;
+      pressed = { x, y, timer: setTimeout(() => { pressed.fired = true; cardMenu({ x, y }, d); }, 550) };
+    });
+    card.addEventListener('pointermove', (e) => { if (pressed && Math.hypot(e.clientX - pressed.x, e.clientY - pressed.y) > 10) { clearTimeout(pressed.timer); pressed = null; } });
+    const release = () => { if (pressed) clearTimeout(pressed.timer); };
+    card.addEventListener('pointerup', release);
+    card.addEventListener('pointercancel', () => { release(); pressed = null; });
+    card.addEventListener('contextmenu', (e) => { e.preventDefault(); if (!pressed?.fired) cardMenu({ x: e.clientX, y: e.clientY }, d); });
     card.addEventListener('click', (e) => {
-      if (e.target.closest('.more')) { e.stopPropagation(); cardMenu(e, d); return; }
+      if (pressed?.fired) { pressed = null; return; } // 길게 누른 뒤 손을 뗀 것은 열기 아님
+      pressed = null;
+      const act = e.target.closest('.card-actions button');
+      if (act) { e.stopPropagation(); cardAction(act.dataset.a, d); return; }
+      if (e.target.closest('.more')) { e.stopPropagation(); const r = e.target.closest('.more').getBoundingClientRect(); cardMenu({ x: r.right - 160, y: r.bottom + 4 }, d); return; }
+      if (libEditing) { cardAction('rename', d); return; } // 편집 중에는 카드를 눌러도 열지 않고 이름 바꾸기
       openDoc(d.id);
     });
     grid.appendChild(card);
@@ -167,35 +190,67 @@ async function renderLibrary() {
     (info.persisted === true ? ' · 영구 저장 허용됨' : info.persisted === false ? ' · 영구 저장 미허용(브라우저가 공간 부족 시 삭제할 수 있음)' : '');
 }
 
-function cardMenu(e, d) {
+/** 홈 편집 모드: 카드마다 이름 바꾸기·사본·삭제 버튼을 보여 준다 */
+function setLibEditing(on) {
+  libEditing = on;
+  $('#library').classList.toggle('lib-editing', on);
+  $('#btnLibEdit span').textContent = on ? '완료' : '편집';
+  $('#btnLibEdit').classList.toggle('primary', on);
+}
+$('#btnLibEdit').addEventListener('click', () => setLibEditing(!libEditing));
+
+function cardMenu(at, d) {
   document.querySelector('.card-menu')?.remove();
   const m = document.createElement('div');
   m.className = 'card-menu';
   m.dataset.ui = '';
-  m.innerHTML = '<button data-a="open">열기</button><button data-a="rename">이름 바꾸기</button><button data-a="del" class="danger">삭제</button>';
+  m.innerHTML = '<button data-a="open">열기</button><button data-a="rename">이름 바꾸기</button><button data-a="dup">사본 만들기</button><button data-a="del" class="danger">삭제</button>';
   document.body.appendChild(m);
-  const r = e.target.closest('.more').getBoundingClientRect();
-  m.style.left = clamp(r.right - 160, 8, innerWidth - 170) + 'px';
-  m.style.top = clamp(r.bottom + 4, 8, innerHeight - 150) + 'px';
+  m.style.left = clamp(at.x, 8, innerWidth - 170) + 'px';
+  m.style.top = clamp(at.y, 8, innerHeight - 190) + 'px';
   const close = () => { m.remove(); document.removeEventListener('pointerdown', outside, true); };
   const outside = (ev) => { if (!m.contains(ev.target)) close(); };
   setTimeout(() => document.addEventListener('pointerdown', outside, true), 0);
-  m.addEventListener('click', async (ev) => {
-    const a = ev.target.dataset.a;
+  m.addEventListener('click', (ev) => {
+    const a = ev.target.closest('button')?.dataset.a;
+    if (!a) return;
     close();
-    if (a === 'open') openDoc(d.id);
-    if (a === 'rename') {
-      const name = prompt('새 이름', d.name);
-      if (name && name.trim()) { await store.patchDoc(d.id, { name: name.trim() }); renderLibrary(); }
-    }
-    if (a === 'del') {
-      if (!confirm(`"${d.name}"을(를) 삭제할까요?\nPDF와 모든 필기가 삭제되며 되돌릴 수 없습니다.`)) return;
-      try { await store.deleteDoc(d.id); toast('삭제했습니다'); }
-      catch (err) { toast('삭제 실패: ' + store.describeError(err), { error: true }); }
-      renderLibrary();
-    }
+    cardAction(a, d);
   });
 }
+
+/** 노트 이름 바꾸기 (홈 카드·편집기 제목 공용). 바꿨으면 새 이름 */
+async function renameDoc(id, cur) {
+  const name = prompt('노트 이름', cur);
+  if (!name || !name.trim() || name.trim() === cur) return null;
+  const n = name.trim().slice(0, 120);
+  await store.patchDoc(id, { name: n });
+  if (state.doc?.id === id) { state.doc.meta.name = n; $('#docTitle').textContent = n; }
+  toast('이름을 바꿨습니다');
+  return n;
+}
+
+async function cardAction(a, d) {
+  if (a === 'open') openDoc(d.id);
+  else if (a === 'rename') { if (await renameDoc(d.id, d.name)) renderLibrary(); }
+  else if (a === 'dup') {
+    busy('사본 만드는 중…');
+    try {
+      const id = await store.duplicateDoc(d.id, uid('d'), `${d.name} 사본`, (b) => uid(b.kind === 'audio' ? 'rec' : 'img'));
+      busy(null);
+      toast(id ? `"${d.name} 사본"을 만들었습니다` : '원본을 찾을 수 없습니다', { error: !id });
+    } catch (err) { busy(null); toast('사본 만들기 실패: ' + store.describeError(err), { error: true }); }
+    renderLibrary();
+  } else if (a === 'del') {
+    if (!confirm(`"${d.name}"을(를) 삭제할까요?\nPDF와 모든 필기가 삭제되며 되돌릴 수 없습니다.`)) return;
+    try { await store.deleteDoc(d.id); toast('삭제했습니다'); }
+    catch (err) { toast('삭제 실패: ' + store.describeError(err), { error: true }); }
+    renderLibrary();
+  }
+}
+
+// 편집기 위쪽 제목을 탭해도 이름 바꾸기
+$('#docTitle').addEventListener('click', () => { if (state.doc) renameDoc(state.doc.id, state.doc.meta.name); });
 
 function showScreen(name) {
   state.screen = name;
