@@ -1276,6 +1276,7 @@ function applyLayers(save = true) {
   viewer.requestInk();
   if (d) for (const p of d.pages.keys()) thumbs.markInk(p);
   $('#btnLayers').classList.toggle('on', layers.length > 1);
+  updateLayerChip();
   if (save && d) {
     d.meta.layers = layers;
     d.meta.activeLayer = activeLayer;
@@ -1285,6 +1286,15 @@ function applyLayers(save = true) {
 }
 
 const layerById = (id) => layers.find((l) => l.id === id);
+
+/** 하단 표시: 지금 쓰고 있는 레이어 이름 (레이어가 여러 개면 위에서 몇 번째인지도) */
+function updateLayerChip() {
+  const l = layerById(activeLayer);
+  if (!l) return;
+  const pos = layers.length > 1 ? ` <small>(${layers.length - layers.indexOf(l)}/${layers.length})</small>` : '';
+  $('#layerChip span').innerHTML = `<b>${escapeHtml(l.name)}</b>${pos}`;
+  $('#layerChip').title = `현재 레이어: ${l.name} (탭하면 레이어 패널)`;
+}
 /** 숨기거나 잠근 레이어가 현재 레이어면 쓸 수 있는 다른 레이어로 바꾼다 */
 function ensureUsableActive() {
   const cur = layerById(activeLayer);
@@ -1406,6 +1416,7 @@ function openLayerPanel() {
 }
 $('#btnLayers').addEventListener('click', () => { if ($('#layerPanel').hidden) openLayerPanel(); else $('#layerPanel').hidden = true; });
 $('#lyClose').addEventListener('click', () => { $('#layerPanel').hidden = true; });
+$('#layerChip').addEventListener('click', () => { if ($('#layerPanel').hidden) openLayerPanel(); else $('#layerPanel').hidden = true; });
 
 // ───────────────────────────── 링크 ─────────────────────────────
 

@@ -366,6 +366,7 @@ input[type=range] { accent-color: var(--accent); }
   .settings-dlg, .small-dlg { width: calc(100vw - 16px); }
   .update-bar { top: calc(54px + env(safe-area-inset-top)); }
   .back-chip { top: 8px; left: 8px; }
+  .layer-chip { left: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); }
   .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
 }
 .text-editor.note-editor { white-space: pre-wrap; overflow-y: auto; background: transparent; border: 1.5px dashed rgba(0,0,0,0.25); word-break: break-word; }
@@ -418,3 +419,11 @@ input[type=range] { accent-color: var(--accent); }
 .ly-row .ly-name small { color: var(--muted); font-size: 11px; }
 .ly-row button.ly-del { color: var(--danger); }
 .ly-row button:disabled { opacity: 0.3; }
+.layer-chip {
+  position: absolute; left: 12px; bottom: calc(82px + env(safe-area-inset-bottom)); z-index: 25; display: inline-flex; align-items: center; gap: 5px;
+  height: 32px; max-width: 46vw; padding: 0 12px 0 8px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text, inherit); font-size: 13px; box-shadow: var(--shadow); opacity: 0.92;
+}
+.layer-chip svg { width: 17px; height: 17px; flex: none; color: var(--accent); }
+.layer-chip span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.layer-chip span b { color: var(--accent); }

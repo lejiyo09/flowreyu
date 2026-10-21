@@ -26,6 +26,11 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await draw(120, 300, 320, 300);
   const A = (await strokes())[0];
   check('stroke on default layer has no ly field', A && !A.ly);
+  check('bottom chip shows current layer', /레이어 1/.test(await page.textContent('#layerChip')) && await page.locator('#layerChip').isVisible(), await page.textContent('#layerChip'));
+  await page.click('#layerChip');
+  await page.waitForTimeout(150);
+  check('tapping the chip opens the layer panel', await page.locator('#layerPanel').isVisible());
+  await page.click('#lyClose');
   await page.click('#btnLayers');
   await page.waitForTimeout(150);
   check('layer panel opens with one layer', (await rows()).length === 1 && await page.locator('#layerPanel').isVisible());
@@ -36,6 +41,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   let R = await rows();
   check('add layer: 2 rows, new one on top & active', R.length === 2 && R[0].on && /레이어 2/.test(R[0].name), JSON.stringify(R));
   const L2 = R[0].id, L1 = R[1].id;
+  check('chip follows the new current layer', /레이어 2.*\(1\/2\)/.test(await page.textContent('#layerChip')), await page.textContent('#layerChip'));
   await page.click('#lyClose');
   await setColor('#e53935');
   await draw(220, 220, 220, 380);
