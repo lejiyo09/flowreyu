@@ -28,6 +28,7 @@ export const GESTURE_ACTIONS = [
   ['toggleRecord', '녹음 시작/정지'],
   ['aiPanel', 'AI 도우미 열기'],
   ['layers', '레이어 패널 열기'],
+  ['clock', '스톱워치·타이머 열기'],
   ['toggleFinger', '손가락 쓰기 켜기/끄기'],
   ['toggleRuler', '자 켜기/끄기'],
   ['toggleProt', '각도기 켜기/끄기'],
@@ -38,7 +39,7 @@ export const GESTURE_ACTIONS = [
 export const GESTURES = [
   ['penButton', 'S Pen 버튼 + 터치', '버튼 신호를 브라우저에 보내는 기기에서만 동작 (갤럭시 탭 크롬은 보내지 않음)', [['eraserHold', '누르는 동안 지우개']]],
   ['penHold', '펜 꾹 누르기', '펜을 대고 움직이지 않으면 (시간·허용 거리는 아래에서)', []],
-  ['penDoubleTap', '펜 두 번 탭', '같은 곳을 빠르게 두 번 탭 (찍힌 점은 지워짐)', []],
+  ['penTripleTap', '펜 세 번 탭', '같은 곳을 빠르게 세 번 탭 (찍힌 점은 지워짐)', []],
   ['twoFingerTap', '두 손가락 탭', '', []],
   ['threeFingerTap', '세 손가락 탭', '', []],
   ['fingerHold', '손가락 꾹 누르기', '한 손가락을 대고 0.6초 움직이지 않으면', []],
@@ -46,6 +47,7 @@ export const GESTURES = [
 
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
+  glass: false, // 글래스모피즘 디자인 (반투명 패널 + 배경 흐림)
 
   // S Pen / 펜
   penHoverButton: true, // 호버 중 버튼 입력(buttons=2)도 메뉴로 처리
@@ -83,14 +85,14 @@ export const DEFAULTS = {
   gestures: {
     penButton: 'menu',
     penHold: 'menu',
-    penDoubleTap: 'menu',
+    penTripleTap: 'menu',
     twoFingerTap: 'undo',
     threeFingerTap: 'redo',
     fingerHold: 'none',
   },
 
   debug: false,
-  sv: 3, // 설정 버전 (기본값 변경 시 마이그레이션)
+  sv: 4, // 설정 버전 (기본값 변경 시 마이그레이션)
 };
 
 function merge(base, over) {
@@ -123,6 +125,12 @@ function migrate(saved) {
     if (saved.threeFingerRedo === false) g.threeFingerTap = 'none';
     for (const k of ['penButtonAction', 'holdEnabled', 'penDoubleTap', 'twoFingerUndo', 'threeFingerRedo']) delete saved[k];
     saved.sv = 3;
+  }
+  if (saved.sv < 4) {
+    // 펜 두 번 탭 → 세 번 탭으로 변경: 지정해 둔 동작은 그대로 옮긴다
+    const g = (saved.gestures = { ...(saved.gestures || {}) });
+    if ('penDoubleTap' in g) { g.penTripleTap = g.penDoubleTap; delete g.penDoubleTap; }
+    saved.sv = 4;
   }
 }
 

@@ -25,6 +25,7 @@ export class Viewer extends Emitter {
   constructor(viewportEl, worldEl, canvases) {
     super();
     this.el = viewportEl;
+    this.insetTop = 0; // 화면 위쪽을 덮는 반투명 바 높이 (글래스 디자인: 페이지가 바 밑으로 지나가되 처음·맨 위는 바 아래에서 시작)
     this.world = worldEl;
     this.hlCanvas = canvases.hl;
     this.inkCanvas = canvases.ink;
@@ -171,8 +172,8 @@ export class Viewer extends Emitter {
     const cw = this.contentW * c.z, ch = this.contentH * c.z;
     if (cw + MARGIN * 2 <= this.vw) c.tx = (this.vw - cw) / 2;
     else c.tx = clamp(c.tx, this.vw - cw - MARGIN, MARGIN);
-    const top = MARGIN, bottom = this.vh - ch - 64 * c.z - MARGIN * 2; // 마지막 페이지 아래 "페이지 추가" 버튼까지 보이도록
-    if (ch + MARGIN * 2 <= this.vh) c.ty = clamp(c.ty, Math.min(top, bottom), Math.max(top, (this.vh - ch) / 2));
+    const top = MARGIN + this.insetTop, bottom = this.vh - ch - 64 * c.z - MARGIN * 2; // 마지막 페이지 아래 "페이지 추가" 버튼까지 보이도록
+    if (ch + MARGIN * 2 + this.insetTop <= this.vh) c.ty = clamp(c.ty, Math.min(top, bottom), Math.max(top, (this.vh + this.insetTop - ch) / 2));
     else c.ty = clamp(c.ty, Math.min(bottom, top), top);
     return c;
   }
@@ -219,8 +220,9 @@ export class Viewer extends Emitter {
   fitPage() {
     const p = this.pages[this.currentPage()];
     if (!p) return;
-    const z = Math.min((this.vw - MARGIN * 2) / p.w, (this.vh - MARGIN * 2) / p.h);
-    this.setCamera(this.vw / 2 - (p.x + p.w / 2) * z, this.vh / 2 - (p.y + p.h / 2) * z, z);
+    const vh = this.vh - this.insetTop;
+    const z = Math.min((this.vw - MARGIN * 2) / p.w, (vh - MARGIN * 2) / p.h);
+    this.setCamera(this.vw / 2 - (p.x + p.w / 2) * z, this.insetTop + vh / 2 - (p.y + p.h / 2) * z, z);
   }
 
   toWorld(sx, sy) { return { x: (sx - this.cam.tx) / this.cam.z, y: (sy - this.cam.ty) / this.cam.z }; }
@@ -287,7 +289,7 @@ export class Viewer extends Emitter {
     i = clamp(i, 0, this.pages.length - 1);
     const p = this.pages[i];
     if (!p) return;
-    this.setCamera(this.cam.tx, MARGIN - (p.y + clamp(y, 0, p.h)) * this.cam.z, this.cam.z);
+    this.setCamera(this.cam.tx, MARGIN + this.insetTop - (p.y + clamp(y, 0, p.h)) * this.cam.z, this.cam.z);
   }
 
   // ───────────────────────── PDF 안의 링크 ─────────────────────────
@@ -351,7 +353,7 @@ export class Viewer extends Emitter {
       this.restoreAnchor(view);
     } else {
       this.cam.z = this.pageFitZ(0);
-      this.setCamera((this.vw - this.contentW * this.cam.z) / 2, MARGIN, this.cam.z);
+      this.setCamera((this.vw - this.contentW * this.cam.z) / 2, MARGIN + this.insetTop, this.cam.z);
     }
   }
 

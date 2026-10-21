@@ -8,6 +8,7 @@ import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
 import { AudioRecorder, fmtTime } from './audio.js';
+import { Clock, fmtClock, ringSound } from './timer.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
@@ -51,6 +52,7 @@ function applyTheme() {
   const pref = settings.get('theme');
   const dark = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.documentElement.classList.toggle('glass', !!settings.get('glass'));
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', applyTheme);
 applyTheme();
@@ -76,7 +78,7 @@ const app = {
   noteDragStart: (sx, sy) => noteDragStart(sx, sy),
   noteDragMove: (sx, sy) => noteDragMove(sx, sy),
   noteDragEnd: (cancel) => noteDragEnd(cancel),
-  // 펜 두 번 탭 메뉴: 첫 탭이 남긴 편집을 기록 없이 되돌리기 위한 표식
+  // 펜 세 번 탭 메뉴: 앞 탭들이 남긴 편집을 기록 없이 되돌리기 위한 표식
   historyMark: () => (state.doc ? { len: state.doc.undoStack.length, top: state.doc.undoStack[state.doc.undoStack.length - 1] } : null),
   revertTo: (mark) => {
     const d = state.doc;
@@ -121,7 +123,16 @@ viewer.on('camera', () => {
   });
 });
 viewer.on('resize', () => { positionOverlays(); });
-viewer.on('sized', () => { thumbs.resizeBoxes(); updatePageIndicator(); });
+viewer.on('sized', () => { thumbs.resizeBoxes(); updatePageIndicator(); updateGlassInset(); });
+
+/** 글래스 디자인이면 위쪽 바가 페이지를 덮으므로, 페이지가 바 아래에서 시작하도록 뷰어에 알린다 */
+function updateGlassInset() {
+  const inset = settings.get('glass') && state.screen === 'editor' ? $('#editor > .topbar').offsetHeight : 0;
+  if (inset === viewer.insetTop) return;
+  const dy = inset - viewer.insetTop;
+  viewer.insetTop = inset;
+  if (viewer.pages.length) viewer.setCamera(viewer.cam.tx, viewer.cam.ty + dy, viewer.cam.z); // 보던 위치를 바 높이만큼 내려 같은 내용이 보이게
+}
 
 // ───────────────────────────── 라이브러리 ─────────────────────────────
 
@@ -187,7 +198,7 @@ function showScreen(name) {
   state.screen = name;
   $('#library').hidden = name !== 'library';
   $('#editor').hidden = name !== 'editor';
-  if (name === 'editor') viewer.resize(true);
+  if (name === 'editor') { viewer.resize(true); updateGlassInset(); }
 }
 
 // ───────────────────────────── 가져오기 ─────────────────────────────
@@ -798,6 +809,7 @@ let recTimer = 0, playRaf = 0, lastFollow = 0;
 
 function openAudioPanel() {
   closeToolPopup();
+  $('#clockPanel').hidden = true;
   $('#layerPanel').hidden = true;
   $('#audioPanel').hidden = false;
   renderRecList();
@@ -1024,6 +1036,7 @@ async function openAiPanel() {
   closeToolPopup();
   $('#audioPanel').hidden = true;
   $('#layerPanel').hidden = true;
+  $('#clockPanel').hidden = true;
   $('#aiPanel').hidden = false;
   $('#aiLang').value = settings.get('ai').lang;
   $('#aiNoKey').hidden = !!getApiKey();
@@ -1411,12 +1424,108 @@ function openLayerPanel() {
   closeToolPopup();
   $('#audioPanel').hidden = true;
   $('#aiPanel').hidden = true;
+  $('#clockPanel').hidden = true;
   $('#layerPanel').hidden = false;
   renderLayers();
 }
 $('#btnLayers').addEventListener('click', () => { if ($('#layerPanel').hidden) openLayerPanel(); else $('#layerPanel').hidden = true; });
 $('#lyClose').addEventListener('click', () => { $('#layerPanel').hidden = true; });
 $('#layerChip').addEventListener('click', () => { if ($('#layerPanel').hidden) openLayerPanel(); else $('#layerPanel').hidden = true; });
+
+// ───────────────────────────── 스톱워치 · 타이머 ─────────────────────────────
+
+const clock = new Clock();
+let clockTab = 'sw', clockTimer = { ms: 0, id: 0 };
+for (const m of [1, 3, 5, 10, 15, 25, 30, 60]) {
+  const b = document.createElement('button');
+  b.textContent = `${m}분`;
+  b.addEventListener('click', () => { clock.tmSet(m * 60000); syncTmInputs(); });
+  $('#tmPresets').appendChild(b);
+}
+function syncTmInputs() {
+  const t = clock.tm.total;
+  $('#tmMin').value = Math.floor(t / 60000);
+  $('#tmSec').value = Math.floor(t / 1000) % 60;
+}
+
+/** 화면 갱신: 패널이 열려 있으면 0.1초, 닫혀 있으면 위쪽 표시만 1초마다 (도는 게 없으면 멈춤) */
+function renderClock() {
+  const open = !$('#clockPanel').hidden;
+  const sw = clock.sw, tm = clock.tm;
+  if (open) {
+    $('#swTime').textContent = fmtClock(clock.swElapsed(), true);
+    $('#swStart').textContent = sw.running ? '일시정지' : (clock.swElapsed() ? '계속' : '시작');
+    $('#tmTime').textContent = tm.done ? '끝!' : fmtClock(clock.tmLeft());
+    $('#tmTime').classList.toggle('done', tm.done);
+    $('#tmStart').textContent = tm.running ? '일시정지' : (tm.left > 0 && tm.left < tm.total ? '계속' : '시작');
+  }
+  // 위쪽 표시: 타이머 우선, 없으면 스톱워치
+  const chip = $('#clockChip');
+  const showTm = tm.running || tm.done, showSw = sw.running && !showTm;
+  chip.hidden = !(showTm || showSw);
+  chip.classList.toggle('done', tm.done);
+  if (showTm) chip.querySelector('span').textContent = tm.done ? '타이머 끝' : fmtClock(clock.tmLeft());
+  else if (showSw) chip.querySelector('span').textContent = fmtClock(clock.swElapsed());
+  const running = sw.running || tm.running;
+  const want = running ? (open ? 100 : 1000) : 0;
+  if (want !== clockTimer.ms) {
+    clearInterval(clockTimer.id);
+    clockTimer = want ? { ms: want, id: setInterval(renderClock, want) } : { ms: 0, id: 0 };
+  }
+}
+function renderLaps() {
+  const laps = clock.sw.laps;
+  $('#swLaps').innerHTML = laps.map((t, i) => {
+    const split = t - (laps[i + 1] || 0);
+    return `<li value="${laps.length - i}">${fmtClock(t, true)}<small>+${fmtClock(split, true)}</small></li>`;
+  }).join('');
+}
+clock.on('change', () => { renderClock(); renderLaps(); });
+clock.on('ring', ({ late }) => {
+  renderClock();
+  if (late) { toast('⏰ 앱이 꺼져 있는 동안 타이머가 끝났습니다'); return; }
+  ringSound();
+  try { navigator.vibrate?.([300, 150, 300, 150, 300]); } catch { /* */ }
+  toast('⏰ 타이머가 끝났습니다', { ms: 6000 });
+});
+// 백그라운드에 있다 돌아오면 끝났는지 확인 (백그라운드 탭은 타이머가 늦게 울림)
+document.addEventListener('visibilitychange', () => { if (!document.hidden) clock.check(); });
+
+function setClockTab(tab) {
+  clockTab = tab;
+  $('#ckTabs').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.value === tab));
+  $('#ckSw').hidden = tab !== 'sw';
+  $('#ckTm').hidden = tab !== 'tm';
+}
+function openClockPanel() {
+  closeToolPopup();
+  for (const id of ['#audioPanel', '#aiPanel', '#layerPanel']) $(id).hidden = true;
+  $('#clockPanel').hidden = false;
+  // 타이머가 돌거나 끝났으면 타이머 탭부터
+  setClockTab(clock.tm.running || clock.tm.done ? 'tm' : clockTab);
+  syncTmInputs();
+  renderLaps();
+  renderClock();
+}
+function closeClockPanel() { $('#clockPanel').hidden = true; clock.ackDone(); renderClock(); }
+$('#btnClock').addEventListener('click', () => { if ($('#clockPanel').hidden) openClockPanel(); else closeClockPanel(); });
+$('#clockChip').addEventListener('click', openClockPanel);
+$('#ckClose').addEventListener('click', closeClockPanel);
+$('#ckTabs').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setClockTab(b.value)));
+$('#swStart').addEventListener('click', () => clock.swToggle());
+$('#swLap').addEventListener('click', () => clock.swLap());
+$('#swReset').addEventListener('click', () => clock.swReset());
+$('#tmStart').addEventListener('click', () => clock.tmToggle());
+$('#tmPlus').addEventListener('click', () => clock.tmAdd(60000));
+$('#tmReset').addEventListener('click', () => clock.tmReset());
+$('#tmApply').addEventListener('click', () => {
+  const ms = ((parseInt($('#tmMin').value, 10) || 0) * 60 + (parseInt($('#tmSec').value, 10) || 0)) * 1000;
+  if (ms < 1000) { toast('1초 이상으로 정하세요'); return; }
+  clock.tmSet(ms);
+});
+clock.schedule();
+clock.check(true); // 앱이 꺼져 있던 동안 끝났는지
+renderClock();
 
 // ───────────────────────────── 링크 ─────────────────────────────
 
@@ -1745,7 +1854,7 @@ function renderToolPopup(tool) {
 }
 
 // ───────────────────────────── 제스처 동작 ─────────────────────────────
-// 설정 → 제스처 동작에서 각 제스처(펜 꾹 누르기, 펜 두 번 탭, 두 손가락 탭 …)에 지정한 동작을 실행한다.
+// 설정 → 제스처 동작에서 각 제스처(펜 꾹 누르기, 펜 세 번 탭, 두 손가락 탭 …)에 지정한 동작을 실행한다.
 
 function runAction(action, sx, sy, source) {
   if (state.screen !== 'editor') return;
@@ -1779,6 +1888,7 @@ function runAction(action, sx, sy, source) {
     case 'toggleRecord': toggleRecording(); break;
     case 'aiPanel': openAiPanel(); break;
     case 'layers': openLayerPanel(); break;
+    case 'clock': openClockPanel(); break;
     case 'toggleFinger': $('#btnFinger').click(); break;
     case 'toggleRuler': $('#btnRuler').click(); break;
     case 'toggleProt': $('#btnProt').click(); break;
@@ -2210,7 +2320,7 @@ $('#backupInput').addEventListener('change', async (e) => {
 });
 
 settings.on('change', ({ path }) => {
-  if (path === 'theme' || path === '*') applyTheme();
+  if (path === 'theme' || path === 'glass' || path === '*') { applyTheme(); updateGlassInset(); }
   if (path === 'debug' || path === '*') { dbg.enable(settings.get('debug')); $('#btnDebug').hidden = !settings.get('debug'); }
   if (path === 'tool' || path === '*') renderToolbar();
 });

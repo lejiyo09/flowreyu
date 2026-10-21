@@ -11,7 +11,13 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.reload();
   await page.waitForTimeout(400);
   const g = await page.evaluate(() => __flexnote.settings.get('gestures'));
-  check('migrates old on/off settings', g.penHold === 'none' && g.penDoubleTap === 'none' && g.twoFingerTap === 'none' && g.penButton === 'eraserHold' && g.threeFingerTap === 'redo' && g.fingerHold === 'none', JSON.stringify(g));
+  check('migrates old on/off settings', g.penHold === 'none' && g.penTripleTap === 'none' && g.twoFingerTap === 'none' && g.penButton === 'eraserHold' && g.threeFingerTap === 'redo' && g.fingerHold === 'none', JSON.stringify(g));
+  // sv3: 펜 두 번 탭에 지정해 둔 동작은 세 번 탭으로 옮겨짐
+  await page.evaluate(() => localStorage.setItem('flexnote.settings.v1', JSON.stringify({ sv: 3, gestures: { penDoubleTap: 'undo' } })));
+  await page.reload();
+  await page.waitForTimeout(400);
+  const g3 = await page.evaluate(() => __flexnote.settings.get('gestures'));
+  check('double-tap action moves to triple-tap', g3.penTripleTap === 'undo' && !('penDoubleTap' in g3), JSON.stringify(g3));
   await page.evaluate(() => localStorage.removeItem('flexnote.settings.v1'));
   await page.reload();
   await page.waitForTimeout(300);
@@ -34,16 +40,18 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.click('#btnSettings');
   check('settings dialog shows 6 gesture selectors', (await page.locator('[data-gesture]').count()) === 6);
   check('pen button has extra "누르는 동안 지우개" option', (await page.locator('[data-gesture=penButton] option[value=eraserHold]').count()) === 1);
-  await page.selectOption('[data-gesture=penDoubleTap]', 'tool:hl');
-  check('select changes the setting', (await page.evaluate(() => __flexnote.settings.get('gestures').penDoubleTap)) === 'tool:hl');
+  await page.selectOption('[data-gesture=penTripleTap]', 'tool:hl');
+  check('select changes the setting', (await page.evaluate(() => __flexnote.settings.get('gestures').penTripleTap)) === 'tool:hl');
   await page.keyboard.press('Escape');
   await page.waitForTimeout(300);
 
-  // 3) 펜 두 번 탭 → 형광펜 (점은 남지 않음)
+  // 3) 펜 세 번 탭 → 형광펜 (점은 남지 않음)
   await h.pen(cdp, [[X(400), Y(300), 0.5]]);
   await page.waitForTimeout(80);
   await h.pen(cdp, [[X(402), Y(301), 0.5]]);
-  check('pen double-tap → highlighter (no dots, no menu)', (await tool()) === 'hl' && (await items()) === 0 && !(await menu()), await tool());
+  await page.waitForTimeout(80);
+  await h.pen(cdp, [[X(401), Y(302), 0.5]]);
+  check('pen triple-tap → highlighter (no dots, no menu)', (await tool()) === 'hl' && (await items()) === 0 && !(await menu()), await tool());
 
   // 4) 펜 꾹 누르기 → 실행 취소
   await page.evaluate(() => __flexnote.settings.set('holdMs', 400));

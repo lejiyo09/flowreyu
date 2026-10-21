@@ -427,3 +427,66 @@ input[type=range] { accent-color: var(--accent); }
 .layer-chip svg { width: 17px; height: 17px; flex: none; color: var(--accent); }
 .layer-chip span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .layer-chip span b { color: var(--accent); }
+.clock-chip { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; padding: 5px 10px; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.clock-chip svg { width: 16px; height: 16px; }
+.clock-chip.done { background: rgba(229,72,77,0.15); color: var(--danger); }
+.clock-panel { width: min(340px, calc(100vw - 16px)); }
+.ck-tabs { display: flex; }
+.ck-tabs button { flex: 1; }
+.ck-big { font-size: 44px; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; letter-spacing: 0.5px; padding: 6px 0; }
+.ck-big.done { color: var(--danger); }
+.ck-btns { display: flex; gap: 6px; justify-content: center; }
+.ck-btns .btn { flex: 1; }
+.ck-laps { margin: 6px 0 0; padding: 0 0 0 2.2em; max-height: 160px; overflow-y: auto; font-variant-numeric: tabular-nums; font-size: 14px; }
+.ck-laps li { padding: 2px 0; }
+.ck-laps li small { color: var(--muted); margin-left: 8px; }
+.ck-presets { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; margin-bottom: 6px; }
+.ck-presets button { border: 1px solid var(--line); background: var(--surface-2); color: inherit; border-radius: 999px; padding: 5px 10px; font-size: 13px; }
+.ck-set { display: flex; align-items: center; gap: 4px; justify-content: center; margin-bottom: 8px; font-size: 13px; }
+.ck-set input { width: 56px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: inherit; text-align: center; }
+
+/* ── 글래스모피즘 (설정 → 화면 → 글래스 디자인) ──
+   반투명 패널 + 뒤 배경 흐림. 화면 위에 떠 있는 도구 모음·패널만 흐림 처리해서 필기 성능 영향을 줄인다. */
+:root.glass {
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-strong: rgba(255, 255, 255, 0.72);
+  --glass-line: rgba(255, 255, 255, 0.65);
+  --glass-shadow: 0 8px 32px rgba(31, 38, 135, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  --surface-2: rgba(255, 255, 255, 0.45);
+  --line: rgba(120, 130, 160, 0.25);
+}
+:root.glass[data-theme="dark"] {
+  --glass-bg: rgba(26, 30, 40, 0.78); /* 흰 PDF 위에서도 글자가 읽히도록 라이트보다 진하게 */
+  --glass-bg-strong: rgba(26, 30, 40, 0.86);
+  --glass-line: rgba(255, 255, 255, 0.14);
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --surface-2: rgba(255, 255, 255, 0.07);
+  --line: rgba(255, 255, 255, 0.12);
+}
+:root.glass body {
+  background: radial-gradient(circle at 12% 18%, #a5c8ff 0, transparent 42%), radial-gradient(circle at 88% 12%, #f5b8e4 0, transparent 40%),
+    radial-gradient(circle at 70% 88%, #b5f0d8 0, transparent 45%), linear-gradient(135deg, #e8ecfb, #f4eefa);
+}
+:root.glass[data-theme="dark"] body {
+  background: radial-gradient(circle at 12% 18%, #22356b 0, transparent 45%), radial-gradient(circle at 88% 12%, #4a2459 0, transparent 42%),
+    radial-gradient(circle at 70% 88%, #134238 0, transparent 45%), linear-gradient(135deg, #12141c, #1a1424);
+}
+:root.glass .viewport, :root.glass .lib-body, :root.glass #library, :root.glass #editor { background: transparent; }
+:root.glass .topbar, :root.glass .lib-head, :root.glass .lib-foot, :root.glass .thumbs {
+  background: var(--glass-bg); border-color: var(--glass-line);
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+}
+:root.glass .toolbar, :root.glass .popup, :root.glass .sel-menu, :root.glass .card-menu, :root.glass .back-chip, :root.glass .layer-chip,
+:root.glass .update-bar {
+  background: var(--glass-bg); border: 1px solid var(--glass-line); box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+}
+:root.glass .dlg { background: var(--glass-bg-strong); border: 1px solid var(--glass-line); box-shadow: var(--glass-shadow); -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%); }
+:root.glass .dlg::backdrop { background: rgba(20, 24, 40, 0.25); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+:root.glass .tools button, :root.glass #btnUndo, :root.glass #btnRedo, :root.glass .toolbar .tg { background: transparent; border-color: transparent; box-shadow: none; }
+:root.glass .tools button.on { background: var(--accent-soft); }
+:root.glass .ly-row, :root.glass .ap-item, :root.glass .ai-out { background: var(--surface-2); }
+/* 위쪽 바도 유리처럼: 바를 페이지 위에 띄워 페이지가 바 밑으로 비쳐 지나가게 (뷰어는 insetTop 만큼 아래에서 시작) */
+:root.glass #editor > .topbar { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--glass-line); box-shadow: var(--glass-shadow); }
+:root.glass #editor .thumbs { padding-top: calc(var(--top-h) + env(safe-area-inset-top)); }
+:root.glass #editor .back-chip { top: calc(var(--top-h) + env(safe-area-inset-top) + 12px); }

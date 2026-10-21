@@ -36,6 +36,7 @@
     <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" opacity=".45"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
     <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" opacity=".45"/><path d="M8 10.5V8a4 4 0 0 1 7.7-1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity=".45"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 9v4.2l2.6 1.6M9.5 3h5M12 3v2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="i-file" viewBox="0 0 24 24"><path d="M6.5 3.5h7l5 5v11a1.5 1.5 0 0 1-1.5 1.5h-10.5A1.5 1.5 0 0 1 5 19.5v-14.5a1.5 1.5 0 0 1 1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.5 3.5v5h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><rect x="5" y="3.5" width="14" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
@@ -87,6 +88,7 @@
       <div class="doc-title" id="docTitle"></div>
     </div>
     <div class="tb-right">
+      <button class="clock-chip" id="clockChip" hidden title="스톱워치·타이머"><svg><use href="#i-clock"/></svg><span>00:00</span></button>
       <button class="rec-chip" id="recChip" hidden title="녹음 중 — 눌러서 녹음 패널"><i></i><span>0:00</span></button>
       <button class="save-state" id="saveState" data-state="saved"><i></i><span>저장됨</span></button>
       <div class="zoom-ctl">
@@ -96,6 +98,7 @@
       </div>
       <button class="page-ind" id="pageInd">1 / 1</button>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
+      <button class="icon-btn" id="btnClock" title="스톱워치·타이머"><svg><use href="#i-clock"/></svg></button>
       <button class="icon-btn" id="btnLayers" title="레이어"><svg><use href="#i-layers"/></svg></button>
       <button class="icon-btn" id="btnAi" title="AI 도우미 (회의록·맞춤법·번역)"><svg><use href="#i-ai"/></svg></button>
       <button class="icon-btn" id="btnRec" title="음성 녹음"><svg><use href="#i-mic"/></svg></button>
@@ -208,6 +211,33 @@
     </div>
     <audio id="apAudio" preload="metadata"></audio>
   </div>
+  <div id="clockPanel" class="popup audio-panel clock-panel" data-ui hidden>
+    <div class="ap-head">
+      <b>스톱워치 · 타이머</b>
+      <button class="icon-btn sm" id="ckClose" title="닫기"><svg><use href="#i-close"/></svg></button>
+    </div>
+    <div class="seg ck-tabs" id="ckTabs"><button value="sw" class="on">스톱워치</button><button value="tm">타이머</button></div>
+    <div id="ckSw">
+      <div class="ck-big" id="swTime">00:00.00</div>
+      <div class="ck-btns">
+        <button class="btn primary" id="swStart">시작</button>
+        <button class="btn" id="swLap">랩</button>
+        <button class="btn" id="swReset">초기화</button>
+      </div>
+      <ol class="ck-laps" id="swLaps"></ol>
+    </div>
+    <div id="ckTm" hidden>
+      <div class="ck-big" id="tmTime">05:00</div>
+      <div class="ck-presets" id="tmPresets"></div>
+      <div class="ck-set"><input type="number" id="tmMin" min="0" max="999" value="5" inputmode="numeric"><span>분</span><input type="number" id="tmSec" min="0" max="59" value="0" inputmode="numeric"><span>초</span><button class="btn sm" id="tmApply">설정</button></div>
+      <div class="ck-btns">
+        <button class="btn primary" id="tmStart">시작</button>
+        <button class="btn" id="tmPlus">+1분</button>
+        <button class="btn" id="tmReset">초기화</button>
+      </div>
+      <p class="muted small" style="margin:0">끝나면 알림음·진동으로 알려 줍니다. 패널을 닫거나 노트를 바꿔도 계속 갑니다.</p>
+    </div>
+  </div>
   <div id="layerPanel" class="popup audio-panel layer-panel" data-ui hidden>
     <div class="ap-head">
       <b>레이어</b>
@@ -280,6 +310,7 @@
             <button type="button" value="system">시스템</button><button type="button" value="light">라이트</button><button type="button" value="dark">다크</button>
           </div>
         </div>
+        <div class="row"><span>글래스 디자인<small>반투명 유리 느낌의 도구 모음·패널 (배경 흐림). 오래된 기기에서는 조금 느려질 수 있음</small></span><input type="checkbox" class="switch" data-setting="glass"></div>
       </section>
 
       <section>

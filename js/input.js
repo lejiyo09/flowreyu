@@ -310,7 +310,7 @@ class PenInput {
     this.active = {
       id: e.pointerId, kind, t0: now(), lastAt: now(), sx0: s.x, sy0: s.y, ax: s.x, ay: s.y,
       moved: false, buttons: e.buttons, holdTimer: 0, toolOverride,
-      mark: this.r.app.historyMark?.(), // 두 번 탭이면 이 시점으로 되돌린다
+      mark: this.r.app.historyMark?.(), // 세 번 탭이면 첫 탭의 이 시점으로 되돌린다
     };
     viewer.pauseRender(true);
     this.tools.begin({ sx: s.x, sy: s.y, p: pressureOf(e, kind), kind, toolOverride, t: e.timeStamp });
@@ -367,7 +367,7 @@ class PenInput {
 
   onUp(e) {
     const a = this.active;
-    if (a && this.checkDoubleTap(a)) return;
+    if (a && this.checkTripleTap(a)) return;
     if (a && e.type === 'pointerup' && Number.isFinite(e.clientX)) {
       // pointerup 위치도 마지막 점으로 반영
       const s = this.r.screen(e);
@@ -383,26 +383,29 @@ class PenInput {
   }
 
   /**
-   * 펜 두 번 탭 → 도구 메뉴. 첫 탭이 만든 점(또는 지운 것)은 되돌리고 두 번째 탭은 그리지 않는다.
-   * 짧고(<250ms) 거의 움직이지 않은 접촉 두 번이 350ms 안에, 18px 안에서 (콜론 같은 점 찍기와 구분) 일어나야 한다.
+   * 펜 세 번 탭 → 지정한 동작(기본 도구 메뉴). 앞의 두 탭이 만든 점(또는 지운 것)은 되돌리고 세 번째 탭은 그리지 않는다.
+   * 짧고(<250ms) 거의 움직이지 않은 접촉이 각각 350ms 안에, 첫 탭에서 18px 안에서 이어져야 한다
+   * (말줄임표 같은 점 찍기·두 번 찍기와 구분).
    */
-  checkDoubleTap(a) {
-    const act = gestureAction('penDoubleTap');
+  checkTripleTap(a) {
+    const act = gestureAction('penTripleTap');
     if (a.kind !== 'pen' || act === 'none') return false;
     const isTap = !a.moved && now() - a.t0 < 250;
     const prev = this.lastTap;
     this.lastTap = null;
     if (!isTap) return false;
     const tool = a.toolOverride || settings.get('tool');
-    if (prev && now() - prev.t < 350 && dist(prev.x, prev.y, a.sx0, a.sy0) < 18 && tool !== 'text') {
+    const chained = prev && now() - prev.t < 350 && dist(prev.x, prev.y, a.sx0, a.sy0) < 18 && tool !== 'text';
+    if (chained && prev.n >= 2) {
       this.end(true);
-      this.r.app.revertTo?.(prev.mark);
+      this.r.app.revertTo?.(prev.mark); // 첫 탭 직전 상태로
       this.r.consumed.add(a.id);
-      this.r.runGesture(act, a.sx0, a.sy0, 'pen-double-tap');
+      this.r.runGesture(act, a.sx0, a.sy0, 'pen-triple-tap');
       return true;
     }
-    // 끝나는 시각 기준으로 다음 탭을 기다린다 (end 이후 기록)
-    queueMicrotask(() => { this.lastTap = { t: now(), x: a.sx0, y: a.sy0, mark: a.mark }; });
+    // 끝나는 시각 기준으로 다음 탭을 기다린다 (end 이후 기록). 연속이면 첫 탭의 위치·기록 지점을 유지
+    const next = chained ? { n: prev.n + 1, x: prev.x, y: prev.y, mark: prev.mark } : { n: 1, x: a.sx0, y: a.sy0, mark: a.mark };
+    queueMicrotask(() => { this.lastTap = { ...next, t: now() }; });
     return false;
   }
 
