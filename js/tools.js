@@ -394,6 +394,7 @@ class EraserTool {
 // ───────────────────────────── 올가미 ─────────────────────────────
 
 const HANDLE = 22; // 화면 px, 크기 조절 손잡이 판정 범위
+const ROT_DY = 26; // 화면 px, 회전 손잡이 중심이 선택 상자 위쪽에서 떨어진 거리 (css .sel-rot)
 
 class LassoTool {
   constructor(ctl) { this.ctl = ctl; }
@@ -414,6 +415,16 @@ class LassoTool {
     const box = this.screenBox();
     if (box) {
       const pad = 8;
+      // 위 가운데 회전 손잡이 → 상자 중심 기준 돌리기
+      if (dist(ev.sx, ev.sy, box.x + box.w / 2, box.y - ROT_DY) <= HANDLE) {
+        c.mode = 'rotate';
+        c.box = box;
+        c.page = this.ctl.selection.page;
+        c.pcx = box.x + box.w / 2; c.pcy = box.y + box.h / 2;
+        c.m = { s: 1, ox: box.pb.x, oy: box.pb.y, dx: 0, dy: 0, r: 0, cx: box.pb.x + box.pb.w / 2, cy: box.pb.y + box.pb.h / 2 };
+        this.ctl.app.onSelection(this.ctl.selection, true);
+        return;
+      }
       const nearHandle = dist(ev.sx, ev.sy, box.x + box.w, box.y + box.h) <= HANDLE;
       const inside = ev.sx >= box.x - pad && ev.sx <= box.x + box.w + pad && ev.sy >= box.y - pad && ev.sy <= box.y + box.h + pad;
       if (nearHandle || inside) {
@@ -450,6 +461,13 @@ class LassoTool {
     if (c.mode === 'move') {
       c.m.dx = (last.sx - c.sx0) / z;
       c.m.dy = (last.sy - c.sy0) / z;
+    } else if (c.mode === 'rotate') {
+      let r = Math.atan2(last.sy - c.pcy, last.sx - c.pcx) - Math.atan2(c.sy0 - c.pcy, c.sx0 - c.pcx);
+      r = Math.atan2(Math.sin(r), Math.cos(r)); // -π ~ π
+      // 15° 단위 근처면 딱 맞춤 (0°·90° 등으로 되돌리기 쉽게)
+      const deg = (r * 180) / Math.PI, snap = Math.round(deg / 15) * 15;
+      if (Math.abs(deg - snap) < 4) r = (snap * Math.PI) / 180;
+      c.m.r = r;
     } else {
       const w0 = c.box.w, h0 = c.box.h;
       const nw = Math.max(last.sx - c.box.x, 8), nh = Math.max(last.sy - c.box.y, 8);
@@ -503,7 +521,7 @@ class LassoTool {
     // 이동/크기 변경 확정
     const m = c.m;
     v.selection = { page: c.page, ids: this.ctl.selection.ids, m: null };
-    if (m.dx || m.dy || m.s !== 1) {
+    if (m.dx || m.dy || m.s !== 1 || m.r) {
       const ids = this.ctl.selection.ids;
       this.ctl.doc.setItems(c.page, this.ctl.doc.items(c.page).map((it) => (ids.has(it.id) ? transformItem(it, m) : it)));
     }

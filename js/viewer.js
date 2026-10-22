@@ -10,7 +10,7 @@
 //    → 이동/확대 중에는 GPU 변환만 일어나므로 끊김이 적고, 멈추면 선명하게 다시 그린다.
 //  - 필기는 화면 크기의 캔버스(형광펜 레이어 / 펜 레이어)에 벡터로 매 프레임 다시 그린다 → 어떤 배율에서도 선명.
 import { Emitter, clamp, rectsIntersect } from './util.js';
-import { drawItem, isHighlighter, bbox, foldHidden, layerSorted, onTopLayer } from './ink.js';
+import { drawItem, isHighlighter, bbox, foldHidden, layerSorted, onTopLayer, transformItem, OBJECT_TYPES } from './ink.js';
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
@@ -599,8 +599,11 @@ export class Viewer extends Emitter {
         const ctx = isHighlighter(it) ? hl : ink;
         const moving = sel && sel.page === p.index && sel.ids.has(it.id) && sel.m;
         if (moving) {
-          const { s, ox, oy, dx, dy } = sel.m;
+          const { s, ox, oy, dx, dy, r, cx, cy } = sel.m;
+          // 회전 중: 상자 모양 개체는 똑바로 선 채 중심만 돌므로 확정 결과를 그대로 그린다
+          if (r && OBJECT_TYPES.has(it.t)) { drawItem(ctx, transformItem(it, sel.m)); continue; }
           ctx.save();
+          if (r) { ctx.translate(cx, cy); ctx.rotate(r); ctx.translate(-cx, -cy); }
           ctx.translate(ox + dx, oy + dy);
           ctx.scale(s, s);
           ctx.translate(-ox, -oy);

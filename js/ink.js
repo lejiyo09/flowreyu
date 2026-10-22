@@ -791,8 +791,18 @@ export function roundPts(pts) {
 }
 
 /** 평행이동 + 균등 확대 (원점 ox,oy 기준 s배 후 dx,dy 이동) */
+/**
+ * 이동·크기·회전 적용. m = {s, ox, oy, dx, dy, r?, cx?, cy?}
+ * (ox,oy) 기준 s배 → (dx,dy) 이동 → (cx,cy) 기준 r 라디안 회전 (cx,cy 는 이동·크기 적용 뒤 좌표)
+ */
 export function transformItem(item, m) {
+  const out = scaleMove(item, m);
+  return m.r ? rotateItem(out, m.r, m.cx, m.cy) : out;
+}
+
+function scaleMove(item, m) {
   const { s, ox, oy, dx, dy } = m;
+  if (s === 1 && !dx && !dy) return item;
   const X = (x) => ox + (x - ox) * s + dx;
   const Y = (y) => oy + (y - oy) * s + dy;
   if (item.t === 's') {
@@ -806,6 +816,44 @@ export function transformItem(item, m) {
   if (item.t === 'ln' || item.t === 'im') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s };
   if (item.t === 'nt' || item.t === 'tb') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, h: item.h * s, fs: item.fs * s };
   if (item.t === 'cl') return { ...item, x: X(item.x), y: Y(item.y), w: item.w * s, fs: item.fs * s };
+  return item;
+}
+
+/**
+ * (cx,cy) 기준 회전. 점으로 된 필기(펜·형광펜·갤러리 획·직선·화살표)는 그대로 돌리고,
+ * 기울일 수 없는 사각형·타원 도형은 같은 모양의 펜 획으로 바꿔 돌린다.
+ * 글상자·포스트잇·그림·표·체크리스트·링크는 똑바로 선 채로 중심만 따라 돈다.
+ */
+function rotateItem(item, r, cx, cy) {
+  const c = Math.cos(r), sn = Math.sin(r);
+  const R = (x, y) => [cx + (x - cx) * c - (y - cy) * sn, cy + (x - cx) * sn + (y - cy) * c];
+  if (item.t === 's') {
+    const pts = item.pts.slice();
+    for (let i = 0; i < pts.length; i += 3) { const [x, y] = R(pts[i], pts[i + 1]); pts[i] = r2(x); pts[i + 1] = r2(y); }
+    return { ...item, pts };
+  }
+  if (item.t === 'fp') {
+    const pts = item.pts.slice();
+    for (let i = 0; i < pts.length; i += 2) { const [x, y] = R(pts[i], pts[i + 1]); pts[i] = r2(x); pts[i + 1] = r2(y); }
+    return { ...item, pts };
+  }
+  if (item.t === 'sh') {
+    if (item.kind === 'line' || item.kind === 'arrow') {
+      const [x1, y1] = R(item.x1, item.y1), [x2, y2] = R(item.x2, item.y2);
+      return { ...item, x1: r2(x1), y1: r2(y1), x2: r2(x2), y2: r2(y2) };
+    }
+    // 사각형·타원 → 같은 모양의 펜 획 (도형은 기울어진 상태를 저장할 수 없음)
+    const pl = shapePolylines(item)[0];
+    const pts = [];
+    for (let i = 0; i < pl.length; i += 2) { const [x, y] = R(pl[i], pl[i + 1]); pts.push(r2(x), r2(y), 0.5); }
+    const { kind: _k, x1: _a, y1: _b, x2: _c, y2: _d, ...rest } = item;
+    return { ...rest, t: 's', tool: 'pen', pr: false, pts };
+  }
+  // 상자 모양 개체: 중심만 회전 이동
+  const b = bbox(item);
+  const [nx, ny] = R(b.x + b.w / 2, b.y + b.h / 2);
+  const ddx = nx - (b.x + b.w / 2), ddy = ny - (b.y + b.h / 2);
+  if ('x' in item && 'y' in item) return { ...item, x: r2(item.x + ddx), y: r2(item.y + ddy) };
   return item;
 }
 

@@ -2238,7 +2238,11 @@ function positionOverlays() {
       let x = b.x, y = b.y, w = b.w, hh = b.h;
       if (m) { x = m.ox + (b.x - m.ox) * m.s + m.dx; y = m.oy + (b.y - m.oy) * m.s + m.dy; w *= m.s; hh *= m.s; }
       const a = viewer.pageToScreen(sel.page, x, y), z = viewer.cam.z;
-      Object.assign(box.style, { left: a.x + 'px', top: a.y + 'px', width: w * z + 'px', height: hh * z + 'px' });
+      Object.assign(box.style, { left: a.x + 'px', top: a.y + 'px', width: w * z + 'px', height: hh * z + 'px', transform: m?.r ? `rotate(${m.r}rad)` : '' });
+      // 돌리는 중: 각도 표시 (글자는 똑바로)
+      const ang = box.querySelector('.sel-angle');
+      ang.hidden = !m?.r;
+      if (m?.r) { ang.textContent = `${Math.round((m.r * 180) / Math.PI)}°`; ang.style.transform = `translateX(-50%) rotate(${-m.r}rad)`; }
       box.hidden = false;
       menu.hidden = !!dragging;
       if (!dragging) {
@@ -2264,8 +2268,8 @@ function positionOverlays() {
         fb.hidden = !notes.length;
         fb.title = notes.some((n) => !n.fold) ? '포스트잇 접기' : '포스트잇 펼치기';
         const mw = menu.offsetWidth, mh = menu.offsetHeight;
-        let top = a.y - mh - 10;
-        if (top < 6) top = a.y + hh * z + 10;
+        let top = a.y - mh - 48; // 상자 위 회전 손잡이(↻)를 가리지 않도록 그만큼 더 위에
+        if (top < 6) top = a.y + hh * z + 14;
         menu.style.left = clamp(a.x + (w * z) / 2 - mw / 2, 6, viewer.vw - mw - 6) + 'px';
         menu.style.top = clamp(top, 6, viewer.vh - mh - 6) + 'px';
       }
