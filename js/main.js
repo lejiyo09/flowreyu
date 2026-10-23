@@ -438,7 +438,7 @@ function showScreen(name) {
   state.screen = name;
   $('#library').hidden = name !== 'library';
   $('#editor').hidden = name !== 'editor';
-  if (name === 'editor') { viewer.resize(true); updateGlassInset(); }
+  if (name === 'editor') { applyToolbarPos(); viewer.resize(true); updateGlassInset(); }
   updatePageTitle();
 }
 
@@ -2031,10 +2031,88 @@ function openToolPopup(tool) {
   const tb = $('#toolbar').getBoundingClientRect();
   const ed = $('#editor').getBoundingClientRect();
   const w = pop.offsetWidth, h = pop.offsetHeight;
-  pop.style.left = clamp(tb.left + tb.width / 2 - w / 2 - ed.left, 8, ed.width - w - 8) + 'px';
-  pop.style.top = (tb.top - ed.top - h - 10) + 'px';
+  // 도구 모음 옆에 띄운다: 세로면 화면 안쪽(왼쪽 모음 → 오른쪽에), 가로면 위·아래 중 넓은 쪽
+  if ($('#toolbar').classList.contains('vertical')) {
+    const right = tb.left + tb.width / 2 < ed.left + ed.width / 2;
+    pop.style.left = clamp(right ? tb.right - ed.left + 10 : tb.left - ed.left - w - 10, 8, ed.width - w - 8) + 'px';
+    pop.style.top = clamp(tb.top + tb.height / 2 - h / 2 - ed.top, 60, ed.height - h - 8) + 'px';
+  } else {
+    pop.style.left = clamp(tb.left + tb.width / 2 - w / 2 - ed.left, 8, ed.width - w - 8) + 'px';
+    const above = tb.top - ed.top > ed.bottom - tb.bottom;
+    pop.style.top = (above ? tb.top - ed.top - h - 10 : tb.bottom - ed.top + 10) + 'px';
+  }
 }
 function closeToolPopup() { $('#toolPopup').hidden = true; }
+
+// ── 도구 모음 옮기기·방향 (플렉슬처럼) ──
+// 손잡이(⋮⋮)를 끌어 놓으면 가장자리 가까이면 붙고(위·아래 = 가로, 왼쪽·오른쪽 = 세로), 아니면 그 자리에 떠 있다.
+// 손잡이를 탭하면 가로/세로가 바뀐다. 위치는 settings.toolbar 에 저장.
+const DOCK_SNAP = 90; // 손가락(펜)을 가장자리에서 이 거리(px) 안에서 놓으면 그쪽에 붙임
+function applyToolbarPos() {
+  const tbEl = $('#toolbar'), ed = $('#editor');
+  const t = settings.get('toolbar');
+  const vertical = t.dock === 'left' || t.dock === 'right' ? true : t.dock === 'float' ? !!t.vertical : false;
+  tbEl.classList.remove('dock-bottom', 'dock-top', 'dock-left', 'dock-right', 'float');
+  tbEl.classList.add(t.dock === 'float' ? 'float' : `dock-${t.dock}`);
+  tbEl.classList.toggle('vertical', vertical);
+  ed.dataset.tb = t.dock;
+  if (t.dock === 'float') {
+    const er = ed.getBoundingClientRect();
+    const w = tbEl.offsetWidth, h = tbEl.offsetHeight;
+    const topMin = $('#editor > .topbar').offsetHeight + 4;
+    tbEl.style.left = clamp(t.x, 4, Math.max(4, er.width - w - 4)) + 'px';
+    tbEl.style.top = clamp(t.y, topMin, Math.max(topMin, er.height - h - 4)) + 'px';
+  } else { tbEl.style.left = ''; tbEl.style.top = ''; }
+}
+{
+  const grip = $('#tbGrip'), tbEl = $('#toolbar');
+  let drag = null;
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    grip.setPointerCapture?.(e.pointerId);
+    const r = tbEl.getBoundingClientRect();
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, offX: e.clientX - r.left, offY: e.clientY - r.top, moved: false };
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return;
+    if (!drag.moved) { drag.moved = true; closeToolPopup(); tbEl.classList.add('dragging'); }
+    const er = $('#editor').getBoundingClientRect();
+    // 끄는 동안은 떠 있는 상태로 손가락을 따라간다 (방향은 그대로)
+    tbEl.classList.remove('dock-bottom', 'dock-top', 'dock-left', 'dock-right');
+    tbEl.classList.add('float');
+    tbEl.style.left = e.clientX - drag.offX - er.left + 'px';
+    tbEl.style.top = e.clientY - drag.offY - er.top + 'px';
+  });
+  const finish = (e, cancel) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    tbEl.classList.remove('dragging');
+    const t = { ...settings.get('toolbar') };
+    const er = $('#editor').getBoundingClientRect(), r = tbEl.getBoundingClientRect();
+    if (cancel) { applyToolbarPos(); return; }
+    if (!d.moved) {
+      // 탭: 가로 ↔ 세로 (붙어 있으면 그 자리에 띄워서 바꿈)
+      const vertical = tbEl.classList.contains('vertical');
+      settings.set('toolbar', { dock: 'float', vertical: !vertical, x: r.left - er.left, y: r.top - er.top });
+      return;
+    }
+    // 붙일 곳은 도구 모음 크기가 아니라 손가락을 놓은 자리로 판단 (가로 모음은 화면 폭만큼 넓으므로)
+    const topH = $('#editor > .topbar').offsetHeight;
+    const dist = { left: e.clientX - er.left, right: er.right - e.clientX, top: e.clientY - er.top - topH, bottom: er.bottom - e.clientY };
+    const [edge, gap] = Object.entries(dist).sort((a, b) => a[1] - b[1])[0];
+    if (gap < DOCK_SNAP) settings.set('toolbar', { ...t, dock: edge });
+    else settings.set('toolbar', { ...t, dock: 'float', vertical: tbEl.classList.contains('vertical'), x: r.left - er.left, y: r.top - er.top });
+  };
+  grip.addEventListener('pointerup', (e) => finish(e, false));
+  grip.addEventListener('pointercancel', (e) => finish(e, true));
+  // 눌렀다 떼면 click 도 오므로 다른 동작이 없게 막는다
+  grip.addEventListener('click', (e) => e.stopPropagation());
+}
+addEventListener('resize', () => { if (settings.get('toolbar').dock === 'float') applyToolbarPos(); });
+$('#btnTbReset').addEventListener('click', () => { settings.set('toolbar', { dock: 'bottom', vertical: false, x: 0, y: 0 }); toast('도구 모음을 아래로 되돌렸습니다'); });
 
 function renderToolPopup(tool) {
   const pop = $('#toolPopup');
@@ -2604,6 +2682,7 @@ settings.on('change', ({ path }) => {
   if (path === 'theme' || path === 'glass' || path === 'glassClear' || path === '*') { applyTheme(); updateGlassInset(); }
   if (path === 'debug' || path === '*') { dbg.enable(settings.get('debug')); $('#btnDebug').hidden = !settings.get('debug'); }
   if (path === 'tool' || path === '*') renderToolbar();
+  if (path === 'toolbar' || path === '*') applyToolbarPos();
 });
 
 // ───────────────────────────── 시작 ─────────────────────────────

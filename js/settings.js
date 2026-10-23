@@ -49,7 +49,8 @@ export const DEFAULTS = {
   theme: 'system', // system | light | dark
   glass: false, // 글래스모피즘 디자인 (반투명 패널 + 배경 흐림)
   exportGallery: false, // PDF 내보내기: 필기를 크롬북 갤러리에서도 편집 가능한 모양으로
-  glassClear: 45, // 글래스 투명도 % (0 = 불투명, 90 = 거의 투명)
+  glassClear: 45,
+  toolbar: { dock: 'bottom', vertical: false, x: 0, y: 0 }, // 도구 모음 위치: bottom | top | left | right | float(x,y: 편집 화면 기준 px) // 글래스 투명도 % (0 = 불투명, 90 = 거의 투명)
 
   // S Pen / 펜
   penHoverButton: true, // 호버 중 버튼 입력(buttons=2)도 메뉴로 처리
@@ -149,6 +150,7 @@ function sanitize(s) {
   s.text.size = clamp(+s.text.size || 16, 6, 120);
   if (!['system', 'light', 'dark'].includes(s.theme)) s.theme = 'system';
   s.glassClear = clamp(Math.round(+s.glassClear), 0, 90);
+  if (!['bottom', 'top', 'left', 'right', 'float'].includes(s.toolbar.dock)) s.toolbar = { ...DEFAULTS.toolbar };
   if (!Number.isFinite(s.glassClear)) s.glassClear = DEFAULTS.glassClear;
   const ids = new Set(GESTURE_ACTIONS.map(([id]) => id));
   for (const [key, , , extra] of GESTURES) {

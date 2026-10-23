@@ -344,15 +344,15 @@ input[type=range] { accent-color: var(--accent); }
   .zoom-ctl { display: none; } /* 두 손가락으로 확대·축소 */
   .page-ind { padding: 6px 8px; font-size: 12px; }
 
-  /* 도구 모음: 화면 폭 전체, 가로 스크롤. 실행 취소/다시 실행은 오른쪽에 고정 */
-  .toolbar {
+  /* 도구 모음(아래 붙임): 화면 폭 전체, 가로 스크롤. 실행 취소/다시 실행은 오른쪽에 고정 */
+  .toolbar.dock-bottom {
     left: 0; right: 0; transform: none; bottom: 0; max-width: none; border-radius: 16px 16px 0 0;
     padding: 6px 0 calc(6px + env(safe-area-inset-bottom)) 4px; border-left: 0; border-right: 0; border-bottom: 0;
   }
   .tools button, #btnUndo, #btnRedo, .toolbar .tg { width: 42px; height: 42px; }
-  #btnUndo, #btnRedo { position: sticky; background: var(--surface); z-index: 1; }
-  #btnRedo { right: 0; }
-  #btnUndo { right: 42px; box-shadow: -10px 0 10px -6px var(--surface); }
+  .dock-bottom #btnUndo, .dock-bottom #btnRedo { position: sticky; background: var(--surface); z-index: 1; }
+  .dock-bottom #btnRedo { right: 0; }
+  .dock-bottom #btnUndo { right: 42px; box-shadow: -10px 0 10px -6px var(--surface); }
   .sep { margin: 0 3px; }
   .quick-colors .swatch { width: 28px; height: 28px; }
 
@@ -521,3 +521,30 @@ input[type=range] { accent-color: var(--accent); }
 .move-item.cur { color: var(--accent); font-weight: 700; }
 .move-item svg { width: 20px; height: 20px; flex: none; color: var(--accent); }
 @media (max-width: 430px) { .brand span { display: none; } } /* 좁은 휴대폰: 버튼 자리를 위해 로고만 */
+
+/* ── 도구 모음 옮기기·방향 (플렉슬처럼): 손잡이로 끌어 위·아래(가로)·왼쪽·오른쪽(세로)에 붙이거나 띄우기 ── */
+.tb-grip { flex: none; width: 22px; height: 46px; border: 0; background: none; color: var(--muted); display: grid; place-items: center; cursor: grab; touch-action: none; border-radius: 8px; padding: 0; }
+.tb-grip:active { cursor: grabbing; background: var(--accent-soft); }
+.tb-grip svg { width: 12px; height: 22px; }
+.toolbar.dock-top { top: calc(var(--top-h) + env(safe-area-inset-top) + 10px); bottom: auto; }
+.toolbar.dock-left, .toolbar.dock-right { top: calc(50% + (var(--top-h) + env(safe-area-inset-top)) / 2); bottom: auto; transform: translateY(-50%); }
+.toolbar.dock-left { left: calc(10px + env(safe-area-inset-left)); }
+.toolbar.dock-right { left: auto; right: calc(10px + env(safe-area-inset-right)); }
+.toolbar.float { bottom: auto; transform: none; }
+.toolbar.dragging { transition: none; box-shadow: 0 12px 36px rgba(0,0,0,0.28); opacity: 0.94; }
+.toolbar.vertical { flex-direction: column; padding: 8px 6px; max-width: none; max-height: calc(100% - var(--top-h) - env(safe-area-inset-top) - 24px); overflow-x: hidden; overflow-y: auto; }
+.toolbar.vertical .tools, .toolbar.vertical .quick-colors { flex-direction: column; }
+.toolbar.vertical .sep { width: 28px; height: 1px; margin: 6px 0; }
+.toolbar.vertical .tb-grip { width: 46px; height: 22px; }
+.toolbar.vertical .tb-grip svg { transform: rotate(90deg); }
+/* 레이어 표시는 도구 모음과 겹치지 않게 */
+#editor[data-tb=left] .layer-chip { left: 76px; bottom: calc(14px + env(safe-area-inset-bottom)); }
+#editor[data-tb=top] .layer-chip, #editor[data-tb=right] .layer-chip, #editor[data-tb=float] .layer-chip { bottom: calc(14px + env(safe-area-inset-bottom)); }
+@media (max-width: 600px) {
+  .toolbar.dock-top { left: 0; right: 0; transform: none; top: calc(var(--top-h) + env(safe-area-inset-top)); max-width: none; border-radius: 0 0 16px 16px; padding: 6px 0 6px 4px; }
+}
+/* 세로 도구 모음: 실행 취소/다시 실행은 아래쪽에 고정 (스크롤해도 항상 보이게) */
+.toolbar.vertical #btnUndo, .toolbar.vertical #btnRedo { position: sticky; background: var(--surface); z-index: 1; }
+.toolbar.vertical #btnRedo { bottom: 0; }
+.toolbar.vertical #btnUndo { bottom: 46px; box-shadow: 0 -10px 10px -6px var(--surface); }
+:root.glass .toolbar.vertical #btnUndo, :root.glass .toolbar.vertical #btnRedo { background: var(--glass-bg-strong); }
