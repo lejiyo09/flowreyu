@@ -315,7 +315,7 @@ input[type=range] { accent-color: var(--accent); }
 .spinner { width: 22px; height: 22px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .toast {
-  position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 95;
+  position: fixed; left: 50%; bottom: calc(max(90px, var(--tb-space, 0px)) + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 95; /* --tb-space: 아래 도구 모음 높이 (여러 줄일 때 가리지 않게) */
   background: rgba(24, 26, 31, 0.92); color: #fff; padding: 10px 16px; border-radius: 12px; font-size: 14px; max-width: calc(100vw - 32px);
   box-shadow: var(--shadow); text-align: center;
 }
@@ -344,15 +344,12 @@ input[type=range] { accent-color: var(--accent); }
   .zoom-ctl { display: none; } /* 두 손가락으로 확대·축소 */
   .page-ind { padding: 6px 8px; font-size: 12px; }
 
-  /* 도구 모음(아래 붙임): 화면 폭 전체, 가로 스크롤. 실행 취소/다시 실행은 오른쪽에 고정 */
+  /* 도구 모음(아래 붙임): 화면 폭 전체. 다 안 들어가면 main.js layoutToolbar 가 여러 줄로 나눔 */
   .toolbar.dock-bottom {
     left: 0; right: 0; transform: none; bottom: 0; max-width: none; border-radius: 16px 16px 0 0;
     padding: 6px 0 calc(6px + env(safe-area-inset-bottom)) 4px; border-left: 0; border-right: 0; border-bottom: 0;
   }
   .tools button, #btnUndo, #btnRedo, .toolbar .tg { width: 42px; height: 42px; }
-  .dock-bottom #btnUndo, .dock-bottom #btnRedo { position: sticky; background: var(--surface); z-index: 1; }
-  .dock-bottom #btnRedo { right: 0; }
-  .dock-bottom #btnUndo { right: 42px; box-shadow: -10px 0 10px -6px var(--surface); }
   .sep { margin: 0 3px; }
   .quick-colors .swatch { width: 28px; height: 28px; }
 
@@ -376,7 +373,7 @@ input[type=range] { accent-color: var(--accent); }
   .update-bar { top: calc(54px + env(safe-area-inset-top)); }
   .back-chip { top: 8px; left: 8px; }
   .layer-chip { left: 8px; bottom: calc(66px + env(safe-area-inset-bottom)); }
-  .toast { bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .toast { bottom: calc(max(80px, var(--tb-space, 0px)) + env(safe-area-inset-bottom)); }
 }
 .text-editor.note-editor { white-space: pre-wrap; overflow-y: auto; background: transparent; border: 1.5px dashed rgba(0,0,0,0.25); word-break: break-word; }
 .sel-menu button.txt { width: auto; padding: 0 8px; font-size: 13px; font-weight: 700; color: var(--accent); }
@@ -543,8 +540,9 @@ input[type=range] { accent-color: var(--accent); }
 @media (max-width: 600px) {
   .toolbar.dock-top { left: 0; right: 0; transform: none; top: calc(var(--top-h) + env(safe-area-inset-top)); max-width: none; border-radius: 0 0 16px 16px; padding: 6px 0 6px 4px; }
 }
-/* 세로 도구 모음: 실행 취소/다시 실행은 아래쪽에 고정 (스크롤해도 항상 보이게) */
-.toolbar.vertical #btnUndo, .toolbar.vertical #btnRedo { position: sticky; background: var(--surface); z-index: 1; }
-.toolbar.vertical #btnRedo { bottom: 0; }
-.toolbar.vertical #btnUndo { bottom: 46px; box-shadow: 0 -10px 10px -6px var(--surface); }
-:root.glass .toolbar.vertical #btnUndo, :root.glass .toolbar.vertical #btnRedo { background: var(--glass-bg-strong); }
+/* 다 안 들어가면 스크롤(버튼이 겹쳐 가려짐) 대신 여러 줄로: 가로 모음은 2~4줄, 세로 모음은 2~4열 (main.js layoutToolbar) */
+.toolbar.wrap { display: grid; gap: 2px; justify-items: center; align-items: center; justify-content: center; overflow: hidden; }
+.toolbar.wrap:not(.vertical) { grid-template-columns: repeat(var(--cols, 8), auto); grid-auto-flow: row; } /* 왼쪽→오른쪽, 줄 바꿈 순서 */
+.toolbar.wrap.vertical { grid-template-columns: repeat(var(--lines, 2), auto); grid-auto-flow: row; max-height: none; }
+.toolbar.wrap .tools, .toolbar.wrap .quick-colors { display: contents; }
+.toolbar.wrap .sep { display: none; }

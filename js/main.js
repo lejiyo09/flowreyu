@@ -439,6 +439,7 @@ function showScreen(name) {
   $('#library').hidden = name !== 'library';
   $('#editor').hidden = name !== 'editor';
   if (name === 'editor') { applyToolbarPos(); viewer.resize(true); updateGlassInset(); }
+  if (name !== 'editor') document.documentElement.style.removeProperty('--tb-space');
   updatePageTitle();
 }
 
@@ -2056,6 +2057,7 @@ function applyToolbarPos() {
   tbEl.classList.add(t.dock === 'float' ? 'float' : `dock-${t.dock}`);
   tbEl.classList.toggle('vertical', vertical);
   ed.dataset.tb = t.dock;
+  layoutToolbar();
   if (t.dock === 'float') {
     const er = ed.getBoundingClientRect();
     const w = tbEl.offsetWidth, h = tbEl.offsetHeight;
@@ -2063,7 +2065,36 @@ function applyToolbarPos() {
     tbEl.style.left = clamp(t.x, 4, Math.max(4, er.width - w - 4)) + 'px';
     tbEl.style.top = clamp(t.y, topMin, Math.max(topMin, er.height - h - 4)) + 'px';
   } else { tbEl.style.left = ''; tbEl.style.top = ''; }
+  // 아래에 붙은 모음이 여러 줄이면 레이어 표시를 그 위로 올린다
+  const chip = $('#layerChip');
+  if (t.dock === 'bottom') {
+    const er = ed.getBoundingClientRect(), r = tbEl.getBoundingClientRect();
+    chip.style.bottom = Math.max(0, er.bottom - r.top) + 10 + 'px';
+    document.documentElement.style.setProperty('--tb-space', Math.max(0, er.bottom - r.top) + 12 + 'px'); // 알림도 그 위에
+  } else { chip.style.bottom = ''; document.documentElement.style.removeProperty('--tb-space'); }
 }
+/**
+ * 도구 모음이 화면에 다 안 들어가면 여러 줄(가로)·여러 열(세로)로 나눈다.
+ * 스크롤 + 고정 버튼은 버튼끼리 겹쳐 가려지므로 쓰지 않는다.
+ */
+function layoutToolbar() {
+  const tbEl = $('#toolbar'), ed = $('#editor');
+  if (ed.hidden) return;
+  tbEl.classList.remove('wrap');
+  tbEl.style.removeProperty('--lines');
+  const vertical = tbEl.classList.contains('vertical');
+  const topH = $('#editor > .topbar').offsetHeight;
+  const avail = vertical ? ed.clientHeight - topH - 24 : ed.clientWidth - (tbEl.classList.contains('dock-bottom') || tbEl.classList.contains('dock-top') ? 8 : 16);
+  const need = vertical ? tbEl.scrollHeight : tbEl.scrollWidth;
+  if (need <= avail + 1) return;
+  const lines = Math.max(2, Math.min(4, Math.ceil(need / Math.max(avail, 1))));
+  tbEl.style.setProperty('--lines', String(lines));
+  // 가로 모음은 왼쪽→오른쪽으로 채우고 줄을 바꾼다: 한 줄에 들어갈 칸 수
+  const cells = [...tbEl.querySelectorAll(':scope > :not(.sep):not(.tools):not(.quick-colors), .tools > *, .quick-colors > *')].length;
+  tbEl.style.setProperty('--cols', String(Math.ceil(cells / lines)));
+  tbEl.classList.add('wrap');
+}
+
 {
   const grip = $('#tbGrip'), tbEl = $('#toolbar');
   let drag = null;
@@ -2111,7 +2142,7 @@ function applyToolbarPos() {
   // 눌렀다 떼면 click 도 오므로 다른 동작이 없게 막는다
   grip.addEventListener('click', (e) => e.stopPropagation());
 }
-addEventListener('resize', () => { if (settings.get('toolbar').dock === 'float') applyToolbarPos(); });
+addEventListener('resize', () => { if (state.screen === 'editor') applyToolbarPos(); }); // 화면 회전·크기 변경: 줄 나눔·위치 다시
 $('#btnTbReset').addEventListener('click', () => { settings.set('toolbar', { dock: 'bottom', vertical: false, x: 0, y: 0 }); toast('도구 모음을 아래로 되돌렸습니다'); });
 
 function renderToolPopup(tool) {

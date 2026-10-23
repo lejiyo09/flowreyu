@@ -84,6 +84,30 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   t = await tb();
   check('reset puts toolbar back at bottom', /dock-bottom/.test(t.cls) && !/vertical/.test(t.cls));
 
+  // 화면 크기·위치마다 버튼이 서로 겹치거나(가려짐) 스크롤 밖으로 숨지 않음
+  const bad = [];
+  for (const vpz of [{ width: 1280, height: 800 }, { width: 800, height: 1280 }, { width: 390, height: 800 }]) {
+    await page.setViewportSize(vpz);
+    for (const st of [{ dock: 'bottom' }, { dock: 'top' }, { dock: 'left' }, { dock: 'right' }, { dock: 'float', vertical: true, x: 200, y: 150 }, { dock: 'float', vertical: false, x: 50, y: 300 }]) {
+      await page.evaluate((x) => __flexnote.settings.set('toolbar', { dock: 'bottom', vertical: false, x: 0, y: 0, ...x }), st);
+      await page.waitForTimeout(120);
+      const r = await page.evaluate(() => {
+        const tb = document.querySelector('#toolbar'), tr = tb.getBoundingClientRect();
+        const els = [...tb.querySelectorAll('button')].filter((e) => e.offsetParent);
+        const rs = els.map((e) => e.getBoundingClientRect());
+        let ov = 0, out = 0;
+        rs.forEach((a, i) => { if (a.left < tr.left - 1 || a.right > tr.right + 1 || a.top < tr.top - 1 || a.bottom > tr.bottom + 1) out++; for (let j = i + 1; j < rs.length; j++) { const b = rs[j]; if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 2 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2) ov++; } });
+        const scroll = tb.scrollWidth > tb.clientWidth + 1 || tb.scrollHeight > tb.clientHeight + 1;
+        const offscreen = tr.left < -1 || tr.top < -1 || tr.right > innerWidth + 1 || tr.bottom > innerHeight + 1;
+        return { ov, out, scroll, offscreen };
+      });
+      if (r.ov || r.out || r.scroll || r.offscreen) bad.push(`${vpz.width}x${vpz.height} ${st.dock}${st.vertical ? 'V' : ''} ${JSON.stringify(r)}`);
+    }
+  }
+  check('no overlapping / hidden toolbar buttons at any size or position', !bad.length, bad.join(' | '));
+  await page.setViewportSize({ width: 1200, height: 860 });
+  await page.evaluate(() => __flexnote.settings.set('toolbar', { dock: 'bottom', vertical: false, x: 0, y: 0 }));
+
   const errs = logs.filter((l) => l.startsWith('[pageerror]'));
   check('no page errors', !errs.length, errs.join('\n'));
   console.log(results.join('\n'));
