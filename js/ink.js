@@ -106,11 +106,16 @@ export function shapePolylines(s) {
   return [];
 }
 
+/** 글자 모양: 굵게(b)·기울임(i)·크기. 글상자·포스트잇·체크리스트·표 공통 */
+export function fontOf(item, fs = item.fs, bold = false) {
+  return `${item.i ? 'italic ' : ''}${item.b || bold ? 'bold ' : ''}${fs}px ${TEXT_FONT}`;
+}
+
 /** 텍스트 줄 분할과 크기 측정 (오프스크린 캔버스) */
 let measureCtx = null;
 export function textLayout(item) {
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
-  measureCtx.font = `${item.fs}px ${TEXT_FONT}`;
+  measureCtx.font = fontOf(item);
   const lines = String(item.text).split('\n');
   let w = 0;
   for (const l of lines) w = Math.max(w, measureCtx.measureText(l).width);
@@ -152,7 +157,7 @@ function computeBBox(item) {
   }
   if (item.t === 'nt' && item.fold) return noteIconRect(item);
   if (item.t === 'cl') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: checkHeight(item) + bh }; } // 위쪽 손잡이 띠 포함
-  if (item.t === 'tb') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
+  if (item.t === 'tb') { const bh = objBarH(item), cs = tableCtlSize(item) + 3; return { x: item.x, y: item.y - bh, w: item.w + cs, h: item.h + bh + cs }; } // 위쪽 손잡이 띠 + 아래·오른쪽 ＋ 버튼 포함
   if (item.t === 'im') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
   if (item.t === 'ln' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
@@ -241,7 +246,7 @@ export function drawItem(ctx, item, opts) {
   } else if (item.t === 'tx') {
     const L = textLayout(item);
     ctx.fillStyle = item.c;
-    ctx.font = `${item.fs}px ${TEXT_FONT}`;
+    ctx.font = fontOf(item);
     ctx.textBaseline = 'top';
     for (let i = 0; i < L.lines.length; i++) {
       ctx.fillText(L.lines[i], item.x, item.y + i * item.fs * TEXT_LINE + item.fs * (TEXT_LINE - 1) / 2);
@@ -394,7 +399,7 @@ export function noteLines(item) {
   const e = entry(item);
   if (e.lines) return e.lines;
   if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
-  measureCtx.font = `${item.fs}px ${TEXT_FONT}`;
+  measureCtx.font = fontOf(item);
   const maxW = Math.max(item.w - NOTE_PAD * 2, item.fs);
   const out = [];
   for (const para of String(item.text || '').split('\n')) {
@@ -467,8 +472,8 @@ function drawNote(ctx, item) {
   ctx.beginPath();
   ctx.rect(item.x, item.y, item.w, item.h);
   ctx.clip();
-  ctx.fillStyle = '#2b2b2b';
-  ctx.font = `${item.fs}px ${TEXT_FONT}`;
+  ctx.fillStyle = item.tc || '#2b2b2b';
+  ctx.font = fontOf(item);
   ctx.textBaseline = 'top';
   const lines = noteLines(item);
   for (let i = 0; i < lines.length; i++) ctx.fillText(lines[i], item.x + NOTE_PAD, item.y + noteTextTop(item) + i * item.fs * TEXT_LINE);
@@ -499,7 +504,7 @@ function drawChecklist(ctx, it, opts) {
   ctx.beginPath();
   ctx.rect(it.x, it.y, it.w, checkHeight(it));
   ctx.clip();
-  ctx.font = `${it.fs}px ${TEXT_FONT}`;
+  ctx.font = fontOf(it);
   ctx.textBaseline = 'middle';
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
@@ -584,6 +589,35 @@ function drawObjBar(ctx, it) {
   ctx.restore();
 }
 
+// 표 가장자리 조절 버튼 (화면 전용): 아래 가운데 ＋ = 행 추가, 오른쪽 가운데 ＋ = 열 추가, 오른쪽 아래 모서리 = 크기 조절 손잡이
+export function tableCtlSize(it) { return Math.max(10, Math.min(18, it.fs * 1.2)); }
+export function tableAddRowBtn(it) { const s = tableCtlSize(it); return { x: it.x + it.w / 2 - s / 2, y: it.y + it.h + 3, w: s, h: s }; }
+export function tableAddColBtn(it) { const s = tableCtlSize(it); return { x: it.x + it.w + 3, y: it.y + it.h / 2 - s / 2, w: s, h: s }; }
+export function tableResizeHandle(it) { const s = tableCtlSize(it); return { x: it.x + it.w - s * 0.6, y: it.y + it.h - s * 0.6, w: s * 1.2, h: s * 1.2 }; }
+/** 크기 조절 최소값: 칸마다 글자 한 줄은 들어가게 */
+export function tableMinSize(it) { const { rows, cols } = tableSize(it); return { w: cols * it.fs * 1.6, h: rows * it.fs * 1.5 }; }
+
+function drawTableCtls(ctx, it) {
+  ctx.save();
+  const plus = (b) => {
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2, r = b.w / 2;
+    ctx.fillStyle = 'rgba(52,120,246,0.9)';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, r * 0.22); ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(cx - r * 0.5, cy); ctx.lineTo(cx + r * 0.5, cy); ctx.moveTo(cx, cy - r * 0.5); ctx.lineTo(cx, cy + r * 0.5); ctx.stroke();
+  };
+  plus(tableAddRowBtn(it));
+  plus(tableAddColBtn(it));
+  // 모서리 크기 조절 표시 (빗금 2줄)
+  const s = tableCtlSize(it), x = it.x + it.w, y = it.y + it.h;
+  ctx.strokeStyle = 'rgba(55,65,85,0.75)'; ctx.lineWidth = Math.max(0.8, s * 0.1); ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.5, y - 1.5); ctx.lineTo(x - 1.5, y - s * 0.5);
+  ctx.moveTo(x - s * 0.25, y - 1.5); ctx.lineTo(x - 1.5, y - s * 0.25);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawTable(ctx, it, opts) {
   const { rows, cols } = tableSize(it);
   if (!opts?.print) drawObjBar(ctx, it);
@@ -607,12 +641,13 @@ function drawTable(ctx, it, opts) {
     const b = cellRect(it, r, c);
     ctx.save();
     ctx.beginPath(); ctx.rect(b.x, b.y, b.w, b.h); ctx.clip();
-    ctx.font = `${r === 0 ? 'bold ' : ''}${it.fs}px ${TEXT_FONT}`;
+    ctx.font = fontOf(it, it.fs, r === 0);
     const lines = wrapText(ctx, text, b.w - pad * 2);
     lines.forEach((l, k) => ctx.fillText(l, b.x + pad, b.y + pad + k * it.fs * TEXT_LINE));
     ctx.restore();
   }
   ctx.restore();
+  if (!opts?.print) drawTableCtls(ctx, it);
 }
 
 /** 폭에 맞춰 줄바꿈 (한글은 글자 단위, 공백이 있으면 단어 단위) */
@@ -868,6 +903,12 @@ function cleanRt(rt) {
 /** 저장소에서 읽은 객체 검증. 잘못된 객체는 null */
 export function sanitizeItem(raw) {
   const it = sanitizeItem0(raw);
+  // 글자 모양(굵게·기울임·포스트잇 글자색) 유지
+  if (it && ['tx', 'nt', 'cl', 'tb'].includes(it.t)) {
+    if (raw.b === true) it.b = true;
+    if (raw.i === true) it.i = true;
+    if (it.t === 'nt' && typeof raw.tc === 'string' && COLOR_RE.test(raw.tc)) it.tc = raw.tc;
+  }
   // 레이어 id 유지
   if (it && typeof raw.ly === 'string' && /^L\w{1,40}$/.test(raw.ly) && raw.ly !== DEFAULT_LAYER) it.ly = raw.ly;
   return it;

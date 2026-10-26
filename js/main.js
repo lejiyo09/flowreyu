@@ -13,7 +13,7 @@ import { mightHaveGalleryInk, extractGalleryInk } from './gallery.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -928,6 +928,10 @@ function tapObjectAt(page, x, y) {
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
     if (!layerUsable(n)) continue; // 숨기거나 잠근 레이어
+    if (n.t === 'tb' && (inside(tableAddRowBtn(n), x, y) || inside(tableAddColBtn(n), x, y))) {
+      tableEdit(page, n.id, inside(tableAddRowBtn(n), x, y) ? 'tb-addRow' : 'tb-addCol');
+      return true;
+    }
     if ((n.t === 'cl' || n.t === 'tb' || n.t === 'im') && inside(objDeleteButton(n), x, y)) {
       commitTextEdit();
       tools.clearSelection();
@@ -976,6 +980,13 @@ function noteDragStart(sx, sy) {
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
     if (!layerUsable(n)) continue;
+    // 표 오른쪽 아래 모서리: 끌어서 가로·세로 크기 조절 (글자 크기는 그대로)
+    if (n.t === 'tb' && inside(tableResizeHandle(n), hit.x, hit.y)) {
+      commitTextEdit();
+      tools.clearSelection();
+      noteDrag = { kind: 'resize', page: hit.page, item: n, sx0: sx, sy0: sy, moved: false };
+      return { page: hit.page };
+    }
     const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' || n.t === 'cl' || n.t === 'im' ? objHandle(n) : null;
     if (!handle || !inside(handle, hit.x, hit.y)) continue;
     commitTextEdit();
@@ -991,9 +1002,17 @@ function noteDragMove(sx, sy) {
   const g = noteDrag;
   if (!g) return;
   const z = viewer.cam.z;
+  if (Math.hypot(sx - g.sx0, sy - g.sy0) > 6) g.moved = true;
+  if (g.kind === 'resize') {
+    const it = g.item, min = tableMinSize(it);
+    g.w = Math.max(min.w, it.w + (sx - g.sx0) / z);
+    g.h = Math.max(min.h, it.h + (sy - g.sy0) / z);
+    viewer.preview = { ...it, w: g.w, h: g.h };
+    viewer.requestInk();
+    return;
+  }
   g.m.dx = (sx - g.sx0) / z;
   g.m.dy = (sy - g.sy0) / z;
-  if (Math.hypot(sx - g.sx0, sy - g.sy0) > 6) g.moved = true;
   viewer.selection = { page: g.page, ids: g.ids, m: { ...g.m } };
   viewer.requestInk();
 }
@@ -1004,6 +1023,12 @@ function noteDragEnd(cancel) {
   viewer.selection = null;
   if (!g) return false;
   const d = state.doc;
+  if (g.kind === 'resize') {
+    viewer.preview = null;
+    if (!cancel && g.moved && d && g.w) d.setItems(g.page, d.items(g.page).map((it) => (it.id === g.item.id ? { ...it, w: g.w, h: g.h } : it)));
+    else viewer.requestInk();
+    return g.moved;
+  }
   if (!cancel && g.moved && d) {
     d.setItems(g.page, d.items(g.page).map((it) => (g.ids.has(it.id) ? transformItem(it, g.m) : it)));
   } else viewer.requestInk();
@@ -2370,6 +2395,10 @@ function positionOverlays() {
         // 글상자/포스트잇 하나만 선택했으면 "편집" 버튼
         const editable = selItems.filter((i) => ['tx', 'nt', 'cl', 'tb'].includes(i.t));
         menu.querySelector('[data-sel=edit]').hidden = !(editable.length === 1 && !selItems.some((i) => i.t === 'nt' && i.fold));
+        const texty = selItems.filter((i) => TEXTY.has(i.t));
+        menu.querySelectorAll('[data-sel=fs-up], [data-sel=fs-dn], [data-sel=bold], [data-sel=ital]').forEach((b) => { b.hidden = !texty.length; });
+        menu.querySelector('[data-sel=bold]').classList.toggle('on', texty.length > 0 && texty.every((i) => i.b));
+        menu.querySelector('[data-sel=ital]').classList.toggle('on', texty.length > 0 && texty.every((i) => i.i));
         const oneTable = selItems.length === 1 && selItems[0].t === 'tb';
         menu.querySelectorAll('[data-sel^=tb-]').forEach((b) => { b.hidden = !oneTable; });
         const notes = selItems.filter((i) => i.t === 'nt');
@@ -2400,26 +2429,54 @@ $('#selMenu').addEventListener('click', (e) => {
     setNotesFold(sel.page, new Set(notes.map((n) => n.id)), fold);
   }
   if (a?.startsWith('tb-')) {
-    // 표 행·열 추가/삭제 (높이·폭은 칸 크기 유지)
     const sel = tools.selection;
-    const items = state.doc.items(sel.page);
-    const t = items.find((i) => sel.ids.has(i.id) && i.t === 'tb');
+    const t = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id) && i.t === 'tb');
     if (!t) return;
-    const { rows, cols } = tableSize(t);
-    let cells = t.cells, w = t.w, h = t.h;
-    if (a === 'tb-addRow') { cells = [...cells, Array(cols).fill('')]; h += h / rows; }
-    if (a === 'tb-delRow' && rows > 1) { cells = cells.slice(0, -1); h -= h / rows; }
-    if (a === 'tb-addCol') { cells = cells.map((r) => [...r, '']); w += w / cols; }
-    if (a === 'tb-delCol' && cols > 1) { cells = cells.map((r) => r.slice(0, -1)); w -= w / cols; }
-    state.doc.setItems(sel.page, items.map((i) => (i.id === t.id ? { ...i, cells, w, h } : i)));
+    tableEdit(sel.page, t.id, a);
     renderSelection(tools.selection);
   }
+  if (['fs-up', 'fs-dn', 'bold', 'ital'].includes(a)) styleSelectedText(a);
   if (a === 'edit') {
     const sel = tools.selection;
     const it = sel && state.doc.items(sel.page).find((i) => sel.ids.has(i.id) && ['tx', 'nt', 'cl', 'tb'].includes(i.t));
     if (it) { tools.clearSelection(); startTextEdit(sel.page, it, undefined, undefined, it.t === 'tb' ? { cell: { r: 0, c: 0 } } : {}); }
   }
 });
+
+/** 표 행·열 추가/삭제 (칸 크기 유지: 표가 그만큼 커지거나 작아짐). 실행 취소 가능 */
+function tableEdit(page, id, a) {
+  const items = state.doc.items(page);
+  const t = items.find((i) => i.id === id);
+  if (!t) return;
+  const { rows, cols } = tableSize(t);
+  let cells = t.cells, w = t.w, h = t.h;
+  if (a === 'tb-addRow') { cells = [...cells, Array(cols).fill('')]; h += h / rows; }
+  if (a === 'tb-delRow' && rows > 1) { cells = cells.slice(0, -1); h -= h / rows; }
+  if (a === 'tb-addCol') { cells = cells.map((r) => [...r, '']); w += w / cols; }
+  if (a === 'tb-delCol' && cols > 1) { cells = cells.map((r) => r.slice(0, -1)); w -= w / cols; }
+  if (cells === t.cells) return;
+  state.doc.setItems(page, items.map((i) => (i.id === id ? { ...i, cells, w, h } : i)));
+}
+
+const TEXTY = new Set(['tx', 'nt', 'cl', 'tb']);
+/** 선택한 글(글상자·포스트잇·체크리스트·표)의 글자 크기·굵게·기울임 바꾸기. 실행 취소 가능 */
+function styleSelectedText(a) {
+  const sel = tools.selection;
+  if (!sel) return;
+  const items = state.doc.items(sel.page);
+  const targets = items.filter((i) => sel.ids.has(i.id) && TEXTY.has(i.t));
+  if (!targets.length) return;
+  const allBold = targets.every((i) => i.b), allItal = targets.every((i) => i.i);
+  const k = a === 'fs-up' ? 1.15 : a === 'fs-dn' ? 1 / 1.15 : 1;
+  const flag = (i, key, on) => { if (on) return { ...i, [key]: true }; const { [key]: _x, ...rest } = i; return rest; };
+  state.doc.setItems(sel.page, items.map((i) => {
+    if (!sel.ids.has(i.id) || !TEXTY.has(i.t)) return i;
+    if (k !== 1) return { ...i, fs: Math.round(clamp(i.fs * k, 4, 200) * 100) / 100 };
+    if (a === 'bold') return flag(i, 'b', !allBold);
+    return flag(i, 'i', !allItal);
+  }));
+  renderSelection(tools.selection);
+}
 
 // ───────────────────────────── 텍스트 편집 ─────────────────────────────
 
@@ -2459,7 +2516,7 @@ function positionTextEditor() {
   const ed = state.editing;
   if (!ed) return;
   const z = viewer.cam.z;
-  const base = { fontSize: ed.fs * z + 'px', color: ed.c, fontFamily: TEXT_FONT, lineHeight: TEXT_LINE, background: '' };
+  const base = { fontSize: ed.fs * z + 'px', color: ed.c, fontFamily: TEXT_FONT, lineHeight: TEXT_LINE, background: '', fontWeight: ed.item?.b ? 'bold' : 'normal', fontStyle: ed.item?.i ? 'italic' : 'normal' };
   // 편집 중에도 문서가 바뀔 수 있으니 최신 개체로 위치 계산
   const it = ed.item && (state.doc?.items(ed.page).find((i) => i.id === ed.item.id) || ed.item);
   if (ed.kind === 'note') {
@@ -2488,14 +2545,14 @@ function positionTextEditor() {
     const pad = it.fs * 0.35;
     Object.assign(te.style, base, {
       left: a.x + 'px', top: a.y + 'px', padding: pad * z + 'px', background: 'rgba(255,255,255,0.95)',
-      width: r.w * z + 'px', height: r.h * z + 'px', fontWeight: ed.cell.r === 0 ? 'bold' : 'normal',
+      width: r.w * z + 'px', height: r.h * z + 'px', fontWeight: ed.cell.r === 0 || it.b ? 'bold' : 'normal',
     });
     return;
   }
   const a = viewer.pageToScreen(ed.page, ed.x, ed.y);
-  const L = textLayout({ text: te.value || ' ', fs: ed.fs });
+  const L = textLayout({ text: te.value || ' ', fs: ed.fs, b: ed.item?.b, i: ed.item?.i });
   Object.assign(te.style, base, {
-    left: a.x - 2 + 'px', top: a.y - 2 + 'px', padding: '0', fontWeight: 'normal', whiteSpace: '',
+    left: a.x - 2 + 'px', top: a.y - 2 + 'px', padding: '0', whiteSpace: '',
     width: Math.max(L.w * z + ed.fs * z * 1.5, 60) + 'px', height: L.h * z + 4 + 'px',
   });
 }
@@ -2550,6 +2607,7 @@ function commitTextEdit({ keepFocus = false } = {}) {
   te.style.padding = '0';
   te.style.whiteSpace = '';
   te.style.fontWeight = 'normal';
+  te.style.fontStyle = 'normal';
   viewer.hidden = null;
   const doc = state.doc;
   const raw = te.value;

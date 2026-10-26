@@ -546,3 +546,5 @@ input[type=range] { accent-color: var(--accent); }
 .toolbar.wrap.vertical { grid-template-columns: repeat(var(--lines, 2), auto); grid-auto-flow: row; max-height: none; }
 .toolbar.wrap .tools, .toolbar.wrap .quick-colors { display: contents; }
 .toolbar.wrap .sep { display: none; }
+.sel-menu button.fmt.on { background: var(--accent-soft); border-radius: 8px; }
+.sel-menu button.fmt b, .sel-menu button.fmt i { font-family: Georgia, serif; font-size: 16px; }
