@@ -238,7 +238,7 @@ export function drawItem(ctx, item, opts) {
     drawImage(ctx, item);
     if (!opts?.print) drawObjBar(ctx, item);
   } else if (item.t === 'nt') {
-    drawNote(ctx, item);
+    drawNote(ctx, item, opts);
   } else if (item.t === 'cl') {
     drawChecklist(ctx, item, opts);
   } else if (item.t === 'tb') {
@@ -323,17 +323,51 @@ export function noteHandle(n) {
 
 const inRect = (b, r) => b.x >= r.x - 0.5 && b.y >= r.y - 0.5 && b.x + b.w <= r.x + r.w + 0.5 && b.y + b.h <= r.y + r.h + 0.5;
 
-/** 포스트잇 위에 쓴 것: 포스트잇보다 나중에(위에) 그려졌고 포스트잇 안에 완전히 들어가는 필기·도형·글상자 */
+/** 포스트잇 오른쪽 아래 모서리: 끌어서 크기 조절 */
+export function noteResizeHandle(n) {
+  const s = Math.max(10, Math.min(18, noteHeadH(n)));
+  return { x: n.x + n.w - s * 0.5, y: n.y + n.h - s * 0.5, w: s, h: s };
+}
+
+/** 표·체크리스트·그림·링크의 본체 영역 (손잡이 띠·＋ 버튼 제외) */
+function objCore(it) { return { x: it.x, y: it.y, w: it.w, h: it.t === 'cl' ? checkHeight(it) : it.h }; }
+const ATTACH_INK = new Set(['s', 'sh', 'tx', 'fp']);
+const ATTACH_OBJ = new Set(['tb', 'cl', 'im', 'ln']);
+
+/**
+ * 포스트잇(또는 표·체크리스트·그림) 위에 넣은 것: 그보다 나중에(위에) 그려졌고
+ * 필기·도형·글상자는 안에 완전히 들어가는 것, 표·체크리스트·그림·링크는 왼쪽 위 모서리가 안에 있는 것
+ */
 export function noteAttached(items, note) {
   const out = [];
   const i0 = items.indexOf(note);
   if (i0 < 0) return out;
-  const rect = { x: note.x, y: note.y, w: note.w, h: note.t === 'cl' ? checkHeight(note) : note.h };
+  const rect = objCore(note);
   for (let j = i0 + 1; j < items.length; j++) {
     const it = items[j];
-    if ((it.t === 's' || it.t === 'sh' || it.t === 'tx') && inRect(bbox(it), rect)) out.push(it.id);
+    if (ATTACH_INK.has(it.t) ? inRect(bbox(it), rect)
+      : ATTACH_OBJ.has(it.t) && it.x >= rect.x - 0.5 && it.y >= rect.y - 0.5 && it.x <= rect.x + rect.w && it.y <= rect.y + rect.h) out.push(it.id);
   }
   return out;
+}
+
+/** 포스트잇을 줄일 수 있는 최소 크기: 안에 넣은 것이 밖으로 빠지지 않게 */
+export function noteMinSize(items, n) {
+  let w = 60, h = noteHeadH(n) + 30;
+  const ids = new Set(noteAttached(items, n));
+  for (const it of items) {
+    if (!ids.has(it.id)) continue;
+    const b = ATTACH_INK.has(it.t) ? bbox(it) : objCore(it);
+    if (ATTACH_INK.has(it.t)) { w = Math.max(w, b.x + b.w - n.x); h = Math.max(h, b.y + b.h - n.y); }
+    else { w = Math.max(w, it.x - n.x + 10); h = Math.max(h, it.y - n.y + 10); }
+  }
+  return { w, h };
+}
+
+/** 포스트잇 글이 끝나는 높이 (페이지 좌표). 글 아래에 표·그림 등을 넣을 때 */
+export function noteTextBottom(n) {
+  const lines = n.text ? noteLines(n).length : 0;
+  return n.y + noteTextTop(n) + lines * n.fs * TEXT_LINE;
 }
 
 // ── 레이어 ──
@@ -421,7 +455,7 @@ export function noteLines(item) {
 /** 포스트잇 글이 시작하는 높이 (띠 아래) */
 export function noteTextTop(n) { return noteHeadH(n) + 4; }
 
-function drawNote(ctx, item) {
+function drawNote(ctx, item, opts) {
   if (item.fold) {
     // 접힌 상태: 작은 포스트잇 아이콘 (모서리 접힘 + 줄)
     const r = noteIconRect(item), f = r.w * 0.3;
@@ -467,6 +501,16 @@ function drawNote(ctx, item) {
   const db = noteDeleteButton(item), cx = db.x + db.w / 2, cy = db.y + db.h / 2, xs = Math.min(db.w, db.h) * 0.2;
   ctx.moveTo(cx - xs, cy - xs); ctx.lineTo(cx + xs, cy + xs); ctx.moveTo(cx + xs, cy - xs); ctx.lineTo(cx - xs, cy + xs);
   ctx.stroke();
+  if (!opts?.print) {
+    // 오른쪽 아래 크기 조절 표시 (빗금 2줄, 화면 전용)
+    const s = noteResizeHandle(item).w, x = item.x + item.w, y = item.y + item.h;
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = Math.max(0.8, s * 0.1);
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.55, y - 2); ctx.lineTo(x - 2, y - s * 0.55);
+    ctx.moveTo(x - s * 0.3, y - 2); ctx.lineTo(x - 2, y - s * 0.3);
+    ctx.stroke();
+  }
   if (!item.text) return;
   ctx.save();
   ctx.beginPath();

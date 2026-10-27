@@ -90,15 +90,15 @@ const BLOCKED = new Set(['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII', 'R
 
 /**
  * Gemini 에 한 번 묻고 답 글을 돌려준다 (스트리밍, onText 로 진행 중인 글 전달)
- * @param {{system:string, parts:Array<{text:string}|{image:{mime:string,data:string}}>, model?:string, effort?:'low'|'medium'|'high', onText?:(delta:string, all:string)=>void, signal?:AbortSignal}} o
+ * @param {{system:string, parts:Array<{text:string}|{image:{mime:string,data:string}}|{media:{mime:string,data:string}}>, model?:string, effort?:'low'|'medium'|'high', json?:boolean, maxTokens?:number, onText?:(delta:string, all:string)=>void, signal?:AbortSignal}} o
  */
-export async function askAi({ system, parts, model = AI_MODELS[0][0], effort = 'medium', onText, signal }) {
+export async function askAi({ system, parts, model = AI_MODELS[0][0], effort = 'medium', json = false, maxTokens = 16000, onText, signal }) {
   const key = getApiKey();
   if (!key) throw new AiError('nokey', 'AI 기능을 쓰려면 설정 → AI 도우미에서 Gemini API 키를 입력하세요.');
   const body = {
     systemInstruction: { parts: [{ text: system }] },
-    contents: [{ role: 'user', parts: parts.map((p) => (p.image ? { inlineData: { mimeType: p.image.mime, data: p.image.data } } : { text: p.text })) }],
-    generationConfig: { maxOutputTokens: 16000, thinkingConfig: { thinkingLevel: effort } },
+    contents: [{ role: 'user', parts: parts.map((p) => { const m = p.image || p.media; return m ? { inlineData: { mimeType: m.mime, data: m.data } } : { text: p.text }; }) }],
+    generationConfig: { maxOutputTokens: maxTokens, thinkingConfig: { thinkingLevel: effort }, ...(json ? { responseMimeType: 'application/json' } : {}) },
   };
   const send = () => fetch(`${API}/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
     method: 'POST',
@@ -179,6 +179,42 @@ export function minutesRequest({ segments = [], pageText = '', image = null, tit
   lines.push('이 자료로 회의록을 작성해 주세요.');
   parts.push({ text: lines.join('\n\n') });
   return { system, parts };
+}
+
+/**
+ * 녹음 받아쓰기 (브라우저 음성 인식보다 정확): 오디오 한 조각(WAV)을 보내 문장별 시작 시각과 글을 받는다
+ * @param {{wav:string(base64), startMs:number, lang?:string}} src  startMs: 이 조각이 녹음의 몇 ms 부터인지 (답의 시각은 조각 기준)
+ */
+export function transcribeRequest({ wav, startMs = 0, lang = '한국어' }) {
+  const system = [
+    '당신은 정확한 받아쓰기(전사) 담당자입니다. 오디오에서 들리는 말을 빠짐없이, 들리는 그대로 적습니다.',
+    `주 언어는 ${lang}이며, 다른 언어로 말한 부분은 그 언어 그대로 적습니다. 번역·요약·교정·말 다듬기는 하지 않습니다 (군말·반복도 들리면 적음).`,
+    '문장(또는 짧은 발화) 단위로 나누고, 각 문장이 시작되는 시각을 이 오디오 시작부터 잰 초(소수 첫째 자리)로 붙입니다. 시각은 실제로 그 말이 들리기 시작하는 순간이어야 합니다.',
+    '알아들을 수 없는 부분은 [불분명]으로 씁니다. 말소리가 없으면 빈 배열을 냅니다. 오디오 맨 끝에서 잘린 단어도 들리는 만큼 적습니다.',
+    '출력은 JSON 배열만: [{"s": 12.3, "text": "문장"}, ...]',
+  ].join('\n');
+  return { system, parts: [{ media: { mime: 'audio/wav', data: wav } }, { text: `이 오디오(전체 녹음의 ${fmtMs(startMs)} 부터)를 받아써 주세요. 시각은 이 오디오 시작 기준 초로.` }] };
+}
+
+/** 받아쓰기 답(JSON) → [{t(ms, 녹음 기준), text}] (시간순, 조각 길이 안으로) */
+export function parseTranscript(out, startMs, durMs) {
+  let arr;
+  try { arr = JSON.parse(out.replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { return null; }
+  if (!Array.isArray(arr)) return null;
+  const sec = (v) => {
+    if (typeof v === 'number') return v;
+    const m = /^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/.exec(String(v ?? '').trim()); // "m:ss" / "h:mm:ss"
+    return m ? (+(m[1] || 0)) * 3600 + +m[2] * 60 + +m[3] : parseFloat(v);
+  };
+  const segs = [];
+  for (const x of arr) {
+    const text = String(x?.text ?? '').trim();
+    const s = sec(x?.s ?? x?.t ?? x?.start);
+    if (!text || !Number.isFinite(s)) continue;
+    segs.push({ t: Math.round(startMs + Math.min(Math.max(0, s * 1000), durMs)), text });
+  }
+  segs.sort((a, b) => a.t - b.t);
+  return segs;
 }
 
 /** 여러 글 조각을 한 번에 보내고 같은 순서로 돌려받기 위한 구분 표시 */

@@ -7,13 +7,13 @@ import { InputRouter } from './input.js';
 import { ToolController } from './tools.js';
 import { ThumbPanel } from './thumbs.js';
 import { Guides } from './guides.js';
-import { AudioRecorder, fmtTime } from './audio.js';
+import { AudioRecorder, fmtTime, wavChunks } from './audio.js';
 import { Clock, fmtClock, ringSound } from './timer.js';
 import { mightHaveGalleryInk, extractGalleryInk } from './gallery.js';
-import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
+import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, transcribeRequest, parseTranscript, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -863,9 +863,10 @@ function blobToDataUrl(blob) {
 const MAX_IMAGE_SIDE = 2400; // 저장 공간을 아끼기 위해 긴 변을 이 크기로 줄인다
 
 /** 그림 파일 → (필요하면 축소·재압축) → 저장 → 현재 화면 가운데에 배치 */
-async function insertImageFile(file, at) {
+async function insertImageFile(file, at, into) {
   const doc = state.doc;
   if (!doc || !file || !/^image\//.test(file.type)) return;
+  const tn = into !== undefined ? into : targetNote(at ? viewer.pageAtScreen(at.x, at.y) : null);
   busy('그림 넣는 중…');
   try {
     let bmp = await createImageBitmap(file);
@@ -887,6 +888,12 @@ async function insertImageFile(file, at) {
     await store.putBlob({ id, docId: doc.id, data: blob, w, h });
     putImage(id, bmp);
     // 놓을 위치: 지정 위치(붙여넣기/끌어놓기) 또는 화면 가운데의 페이지
+    if (tn) {
+      const item = addIntoNote(tn, (r) => { const k = Math.min(1, r.w / w); return { id: uid('im'), t: 'im', x: r.x, y: r.y + objBarH({}), w: w * k, h: h * k, blob: id }; });
+      if (item) selectAfterInsert(tn.page, item.id);
+      toast('포스트잇 안에 그림을 넣었습니다', { ms: 2000 });
+      return;
+    }
     const hit = (at && viewer.pageAtScreen(at.x, at.y)) || viewer.pageAtScreen(viewer.vw / 2, viewer.vh / 2) || { page: viewer.currentPage(), x: 50, y: 50 };
     const p = viewer.pages[hit.page];
     const s = Math.min((p.w * 0.6) / w, (p.h * 0.5) / h, 1); // 페이지 폭 60%·높이 50% 안, 원본보다 키우지 않음
@@ -925,9 +932,10 @@ const inside = (r, x, y) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y +
 function tapObjectAt(page, x, y) {
   const d = state.doc;
   const items = d?.items(page) || [];
+  const folded = foldHidden(items);
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
-    if (!layerUsable(n)) continue; // 숨기거나 잠근 레이어
+    if (!layerUsable(n) || folded?.has(n.id)) continue; // 숨기거나 잠근 레이어, 접힌 포스트잇 안
     if (n.t === 'tb' && (inside(tableAddRowBtn(n), x, y) || inside(tableAddColBtn(n), x, y))) {
       tableEdit(page, n.id, inside(tableAddRowBtn(n), x, y) ? 'tb-addRow' : 'tb-addCol');
       return true;
@@ -977,14 +985,18 @@ function noteDragStart(sx, sy) {
   const hit = d && viewer.pageAtScreen(sx, sy, true);
   if (!hit) return false;
   const items = d.items(hit.page);
+  const folded = foldHidden(items);
   for (let i = items.length - 1; i >= 0; i--) {
     const n = items[i];
-    if (!layerUsable(n)) continue;
-    // 표 오른쪽 아래 모서리: 끌어서 가로·세로 크기 조절 (글자 크기는 그대로)
-    if (n.t === 'tb' && inside(tableResizeHandle(n), hit.x, hit.y)) {
+    if (!layerUsable(n) || folded?.has(n.id)) continue;
+    // 표·포스트잇 오른쪽 아래 모서리: 끌어서 가로·세로 크기 조절 (글자 크기는 그대로)
+    const rh = n.t === 'tb' ? tableResizeHandle(n) : n.t === 'nt' && !n.fold ? noteResizeHandle(n) : null;
+    if (rh && inside(rh, hit.x, hit.y)) {
       commitTextEdit();
       tools.clearSelection();
-      noteDrag = { kind: 'resize', page: hit.page, item: n, sx0: sx, sy0: sy, moved: false };
+      const cur = d.items(hit.page).find((it) => it.id === n.id) || n;
+      const min = n.t === 'tb' ? tableMinSize(cur) : noteMinSize(d.items(hit.page), cur);
+      noteDrag = { kind: 'resize', page: hit.page, item: cur, min, sx0: sx, sy0: sy, moved: false };
       return { page: hit.page };
     }
     const handle = n.t === 'nt' ? noteHandle(n) : n.t === 'tb' || n.t === 'cl' || n.t === 'im' ? objHandle(n) : null;
@@ -1004,7 +1016,7 @@ function noteDragMove(sx, sy) {
   const z = viewer.cam.z;
   if (Math.hypot(sx - g.sx0, sy - g.sy0) > 6) g.moved = true;
   if (g.kind === 'resize') {
-    const it = g.item, min = tableMinSize(it);
+    const it = g.item, min = g.min;
     g.w = Math.max(min.w, it.w + (sx - g.sx0) / z);
     g.h = Math.max(min.h, it.h + (sy - g.sy0) / z);
     viewer.preview = { ...it, w: g.w, h: g.h };
@@ -1053,9 +1065,67 @@ function placeAt(at) {
   return (at && viewer.pageAtScreen(at.x, at.y)) || viewer.pageAtScreen(viewer.vw / 2, viewer.vh / 2) || { page: viewer.currentPage(), x: 50, y: 50 };
 }
 
+let lastNoteEdit = null; // {page, id, t} 마지막으로 글을 쓴 포스트잇
+/** 그 자리의 펼친 포스트잇 (맨 위) */
+function noteAtPoint(page, x, y) {
+  const items = state.doc.items(page), folded = foldHidden(items);
+  for (let i = items.length - 1; i >= 0; i--) {
+    const n = items[i];
+    if (n.t === 'nt' && !n.fold && layerUsable(n) && !folded?.has(n.id) && inside(n, x, y)) return n;
+  }
+  return null;
+}
+
+/** 넣을 포스트잇: 글을 쓰고 있는 포스트잇 → 올가미로 선택한 포스트잇 하나 → 넣을 자리의 포스트잇 */
+function targetNote(hit) {
+  const d = state.doc, ed = state.editing;
+  if (ed?.kind === 'note') { const n = d.items(ed.page).find((i) => i.id === ed.item.id); if (n) return { page: ed.page, note: n }; }
+  // 도구 모음 버튼을 누르면 입력칸이 먼저 닫히므로, 방금(2초 안) 글을 쓰던 포스트잇도 대상
+  if (lastNoteEdit && performance.now() - lastNoteEdit.t < 2000) {
+    const n = d.items(lastNoteEdit.page).find((i) => i.id === lastNoteEdit.id && !i.fold);
+    if (n) return { page: lastNoteEdit.page, note: n };
+  }
+  const sel = tools.selection;
+  if (sel) {
+    const ns = d.items(sel.page).filter((i) => sel.ids.has(i.id) && i.t === 'nt' && !i.fold);
+    if (ns.length === 1) return { page: sel.page, note: ns[0] };
+  }
+  const n = hit && noteAtPoint(hit.page, hit.x, hit.y);
+  return n ? { page: hit.page, note: n } : null;
+}
+
+/**
+ * 포스트잇 안에 표·체크리스트·그림 넣기: 글과 이미 넣은 것 아래에 포스트잇 폭에 맞춰 놓고,
+ * 모자라면 포스트잇을 늘린다 (한 번에 실행 취소). make({x, y, w}) → 개체 (y 는 손잡이 띠 위쪽)
+ */
+function addIntoNote(t, make) {
+  commitTextEdit();
+  const d = state.doc;
+  const items = d.items(t.page);
+  const n = items.find((i) => i.id === t.note.id);
+  if (!n) return null;
+  let top = noteTextBottom(n) + 4;
+  const att = new Set(noteAttached(items, n));
+  for (const it of items) if (att.has(it.id)) { const b = bbox(it); top = Math.max(top, b.y + b.h + 4); }
+  const item = { ...make({ x: n.x + NOTE_PAD, y: top, w: n.w - NOTE_PAD * 2 }), ly: layerOf(n) };
+  const bottom = item.y + (item.t === 'cl' ? checkHeight(item) : item.h) + (item.t === 'tb' ? tableCtlSize(item) + 3 : 0) + NOTE_PAD;
+  d.begin();
+  if (bottom > n.y + n.h) d.setItems(t.page, items.map((i) => (i.id === n.id ? { ...i, h: bottom - n.y } : i)));
+  d.add(t.page, item);
+  d.commit();
+  return item;
+}
+
 function insertChecklist(at) {
   const doc = state.doc;
   if (!doc) return;
+  const tn = targetNote(at ? viewer.pageAtScreen(at.x, at.y) : null);
+  if (tn) {
+    const fs = Math.min(15 / viewer.cam.z, tn.note.fs);
+    const item = addIntoNote(tn, (r) => ({ id: uid('cl'), t: 'cl', x: r.x, y: r.y + objBarH({ fs }), w: r.w, fs, c: '#1c1f24', rows: [{ text: '', done: false }] }));
+    if (item) startTextEdit(tn.page, item, undefined, undefined, { isNew: true });
+    return;
+  }
   const hit = placeAt(at), p = viewer.pages[hit.page], z = viewer.cam.z;
   const w = Math.min(260 / z, p.w * 0.8), fs = 15 / z;
   const bh = objBarH({ fs }); // 위쪽 손잡이 띠가 페이지 밖으로 나가지 않게
@@ -1064,9 +1134,17 @@ function insertChecklist(at) {
   startTextEdit(hit.page, item, undefined, undefined, { isNew: true });
 }
 
-function insertTable(rows, cols, at) {
+function insertTable(rows, cols, at, into) {
   const doc = state.doc;
   if (!doc) return;
+  const tn = into !== undefined ? into : targetNote(at ? viewer.pageAtScreen(at.x, at.y) : null);
+  if (tn) {
+    const fs = Math.min(13 / viewer.cam.z, tn.note.fs);
+    const cells = Array.from({ length: rows }, () => Array.from({ length: cols }, () => ''));
+    const item = addIntoNote(tn, (r) => ({ id: uid('tb'), t: 'tb', x: r.x, y: r.y + objBarH({ fs }), w: r.w - tableCtlSize({ fs }) - 3, h: rows * fs * 2.2, fs, cells }));
+    if (item) startTextEdit(tn.page, item, undefined, undefined, { cell: { r: 0, c: 0 } });
+    return;
+  }
   const hit = placeAt(at), p = viewer.pages[hit.page], z = viewer.cam.z;
   const fs = 13 / z;
   const w = Math.min(cols * 110 / z, p.w * 0.9), h = Math.min(rows * fs * 2.2, p.h * 0.8);
@@ -1078,14 +1156,18 @@ function insertTable(rows, cols, at) {
 }
 
 $('#btnChecklist').addEventListener('click', () => insertChecklist());
-$('#btnTable').addEventListener('click', () => $('#tableDlg').showModal());
+let tableInto = null; // 표를 넣을 포스트잇 (대화상자를 열 때 정함)
+$('#btnTable').addEventListener('click', () => { tableInto = state.doc ? targetNote(null) : null; $('#tableDlg').showModal(); });
 $('#tableDlg').addEventListener('close', () => {
+  const into = tableInto;
+  tableInto = null;
   if ($('#tableDlg').returnValue !== 'ok') return;
-  insertTable(clamp(parseInt($('#tbRows').value, 10) || 3, 1, 30), clamp(parseInt($('#tbCols').value, 10) || 3, 1, 12));
+  insertTable(clamp(parseInt($('#tbRows').value, 10) || 3, 1, 30), clamp(parseInt($('#tbCols').value, 10) || 3, 1, 12), undefined, into);
 });
 
-$('#btnImage').addEventListener('click', () => $('#imageInput').click());
-$('#imageInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; insertImageFile(f); });
+let imageInto = null; // 그림을 넣을 포스트잇 (파일 고르기 전에 정함)
+$('#btnImage').addEventListener('click', () => { imageInto = state.doc ? targetNote(null) : null; $('#imageInput').click(); });
+$('#imageInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; const into = imageInto; imageInto = null; insertImageFile(f, undefined, into); });
 $('#btnNote').addEventListener('click', () => insertNote());
 // 붙여넣기(Ctrl+V)와 끌어 놓기로도 그림 넣기
 document.addEventListener('paste', (e) => {
@@ -1186,7 +1268,7 @@ async function renderRecList() {
   for (const r of list) {
     const b = document.createElement('button');
     b.className = 'ap-item' + (player?.rec.id === r.id ? ' on' : '');
-    b.innerHTML = `<span>🎙 ${escapeHtml(r.name || '녹음')}</span><span class="muted">${fmtTime(r.duration)}${r.segments?.length ? ' · 받아쓰기' : ''}</span>`;
+    b.innerHTML = `<span>🎙 ${escapeHtml(r.name || '녹음')}</span><span class="muted">${fmtTime(r.duration)}${r.segments?.length ? (r.sttAi ? ' · AI 받아쓰기' : ' · 받아쓰기') : ''}</span>`;
     b.addEventListener('click', () => loadRecording(r.id));
     box.appendChild(b);
   }
@@ -1265,6 +1347,7 @@ function seekToInkAt(page, x, y) {
 
 /** 재생 멈춤. full=true 면 불러온 녹음도 내리고 필기를 원래대로 */
 function stopPlayback(full = true) {
+  if (full) sttJob?.abort();
   cancelAnimationFrame(playRaf);
   audioEl.pause();
   if (full) {
@@ -1312,6 +1395,43 @@ $('#apInsertText').addEventListener('click', () => {
   const item = { id: uid('nt'), t: 'nt', x: clamp(hit.x - w / 2, 0, p.w - w), y: clamp(hit.y - h / 2, 0, p.h - h), w, h, c: '#b3e5fc', fs, text };
   state.doc.add(hit.page, item);
   toast('받아쓴 글을 포스트잇으로 붙였습니다');
+});
+// AI 받아쓰기: 녹음을 4분 조각(16kHz WAV)으로 나눠 Gemini 에 보내고, 문장별 시각을 조각 시작 시각에 더해 합친다.
+// 끝나면 브라우저 받아쓰기 결과를 바꿔 저장 (실패하면 그대로 둠). 진행 중에 다시 누르면 중지
+let sttJob = null;
+$('#apAiStt').addEventListener('click', async () => {
+  if (sttJob) { sttJob.abort(); return; }
+  if (!player) return;
+  const rec = player.rec, btn = $('#apAiStt'), label = btn.textContent;
+  const ctrl = new AbortController();
+  sttJob = ctrl;
+  btn.textContent = '■ 받아쓰기 중지';
+  const info = (t) => { $('#apInterim').textContent = t; };
+  const segs = [];
+  try {
+    info('녹음 파일 준비 중…');
+    for await (const ch of wavChunks(rec.data)) {
+      if (ctrl.signal.aborted) throw new AiError('abort', '중지했습니다.');
+      info(`AI 받아쓰는 중… ${fmtTime(ch.startMs)} / ${fmtTime(ch.totalMs)}`);
+      const { system, parts } = transcribeRequest({ wav: ch.wav, startMs: ch.startMs });
+      const res = await askAi({ system, parts, model: settings.get('ai').model, effort: 'low', json: true, maxTokens: 32000, signal: ctrl.signal });
+      const got = parseTranscript(res.text, ch.startMs, ch.durMs);
+      if (!got) throw new AiError('format', 'AI 답을 읽지 못했습니다. 다시 시도하세요.');
+      segs.push(...got);
+    }
+    if (!segs.length) { info('들리는 말이 없습니다 (받아쓰기는 그대로 둠)'); return; }
+    const updated = { ...rec, segments: segs, sttAi: true };
+    await store.putBlob(updated);
+    if (player?.rec.id === rec.id) { player.rec = updated; renderTranscript(); setReplayTime(audioEl.currentTime * 1000); }
+    renderRecList();
+    info(`✓ AI 받아쓰기 완료 · ${segs.length}문장`);
+  } catch (e) {
+    info('');
+    if (e?.code !== 'abort') toast(e instanceof AiError ? e.message : 'AI 받아쓰기 실패: ' + (e?.message || e), { error: true, ms: 6000 });
+  } finally {
+    sttJob = null;
+    btn.textContent = label;
+  }
 });
 $('#apDownload').addEventListener('click', () => {
   if (!player) return;
@@ -1841,8 +1961,9 @@ async function followLinkAt(sx, sy) {
   if (player && seekToInkAt(hit.page, hit.x, hit.y)) return; // 녹음 재생 중: 탭한 필기를 쓰던 순간으로
   const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
   const items = state.doc.items(hit.page);
+  const folded = foldHidden(items);
   for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].t === 'ln' && !layerHidden(items[i]) && inside(items[i])) { followTarget(items[i].to); return; }
+    if (items[i].t === 'ln' && !layerHidden(items[i]) && !folded?.has(items[i].id) && inside(items[i])) { followTarget(items[i].to); return; }
   }
   const links = await viewer.pdfLinks(hit.page);
   const l = links.find(inside);
@@ -1909,7 +2030,11 @@ lnDlg.addEventListener('close', () => {
     to = { page: n - 1 };
   }
   if (ed.item) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, to } : i)));
-  else doc.add(ed.page, { id: uid('ln'), t: 'ln', ...ed.rect, to });
+  else {
+    // 포스트잇 위에 만든 링크는 포스트잇과 같은 레이어로 (포스트잇에 가려지지 않고 함께 움직이게)
+    const n = noteAtPoint(ed.page, ed.rect.x, ed.rect.y);
+    doc.add(ed.page, { id: uid('ln'), t: 'ln', ...ed.rect, to, ...(n ? { ly: layerOf(n) } : {}) });
+  }
 });
 
 // ───────────────────────────── Undo / Redo ─────────────────────────────
@@ -2499,7 +2624,7 @@ function startTextEdit(page, item, x, y, opts = {}) {
   state.editing = ed;
   te.classList.toggle('note-editor', ed.kind !== 'text');
   // 편집하는 동안 그 개체(글)는 화면에서 숨기고 입력칸만 보이게 (표·체크리스트는 칸/상자가 보이도록 그대로)
-  if (item && (ed.kind === 'text' || ed.kind === 'note')) { viewer.hidden = new Set([item.id]); viewer.requestInk(); }
+  if (item && ed.kind === 'text') { viewer.hidden = new Set([item.id]); viewer.requestInk(); }
   te.value = ed.kind === 'check' ? item.rows.map((r) => r.text).join('\n')
     : ed.kind === 'cell' ? item.cells[ed.cell.r][ed.cell.c]
     : item ? item.text : '';
@@ -2561,6 +2686,12 @@ te.addEventListener('input', () => { previewChecklist(); positionTextEditor(); }
 /** 체크리스트 편집 중: 지금 입력한 줄 수만큼 상자를 바로 그려 보여 준다 (저장·실행 취소 기록은 확정할 때) */
 function previewChecklist() {
   const ed = state.editing;
+  if (ed?.kind === 'note') {
+    // 포스트잇: 종이(배경)·띠·안에 넣은 것은 그대로 그리고 글만 빼서 입력칸 글과 겹치지 않게
+    const cur = state.doc?.items(ed.page).find((i) => i.id === ed.item.id);
+    if (cur && viewer.preview?.id !== cur.id) { viewer.preview = { ...cur, text: '' }; viewer.requestInk(); }
+    return;
+  }
   if (ed?.kind !== 'check') { if (viewer.preview) { viewer.preview = null; viewer.requestInk(); } return; }
   const cur = state.doc?.items(ed.page).find((i) => i.id === ed.item.id);
   if (!cur) return;
@@ -2602,6 +2733,7 @@ function commitTextEdit({ keepFocus = false } = {}) {
   const ed = state.editing;
   if (!ed) return;
   state.editing = null;
+  if (ed.kind === 'note') lastNoteEdit = { page: ed.page, id: ed.item.id, t: performance.now() };
   te.hidden = true;
   if (viewer.preview) { viewer.preview = null; viewer.requestInk(); }
   te.style.padding = '0';
