@@ -313,7 +313,7 @@ class PenInput {
       mark: this.r.app.historyMark?.(), // 세 번 탭이면 첫 탭의 이 시점으로 되돌린다
     };
     viewer.pauseRender(true);
-    this.tools.begin({ sx: s.x, sy: s.y, p: pressureOf(e, kind), kind, toolOverride, t: e.timeStamp });
+    this.tools.begin({ sx: s.x, sy: s.y, p: pressureOf(e, kind), kind, toolOverride, t: e.timeStamp, shift: e.shiftKey });
     this.armHold();
   }
 

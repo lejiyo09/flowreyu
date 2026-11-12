@@ -136,8 +136,14 @@
       <div id="overlay" class="overlay">
         <div id="selBox" class="sel-box" hidden><i class="sel-handle"></i><i class="sel-rot" title="돌리기"></i><span class="sel-angle" hidden></span></div>
         <div id="selMenu" class="sel-menu" data-ui hidden>
-          <button data-sel="delete" title="삭제"><svg><use href="#i-trash"/></svg></button>
-          <button data-sel="dup" title="복제"><svg><use href="#i-copy"/></svg></button>
+          <span class="sel-count" id="selCount"></span>
+          <button data-sel="add" class="txt" title="선택 추가: 켜면 탭할 때마다 객체를 넣고 빼고, 올가미는 더하기 (Shift 를 누른 채로도 됨)">＋선택</button>
+          <button data-sel="delete" title="삭제 (Delete)"><svg><use href="#i-trash"/></svg></button>
+          <button data-sel="dup" title="복제 (Ctrl+D)"><svg><use href="#i-copy"/></svg></button>
+          <button data-sel="copy" class="txt" title="복사 (Ctrl+C) — 다른 페이지·노트에 붙여넣기 (Ctrl+V 또는 길게 눌러 메뉴)">복사</button>
+          <button data-sel="group" class="txt" title="묶기 (Ctrl+G): 함께 선택·이동" hidden>묶기</button>
+          <button data-sel="ungroup" class="txt" title="묶음 풀기 (Ctrl+Shift+G)" hidden>풀기</button>
+          <button data-sel="more" class="txt" title="순서·정렬">정리 ▾</button>
           <button data-sel="edit" title="글 편집" hidden><svg><use href="#i-text"/></svg></button>
           <button data-sel="fold" title="포스트잇 접기/펼치기" hidden><svg><use href="#i-fold"/></svg></button>
           <button data-sel="fs-dn" class="txt" title="글자 작게" hidden>A−</button>
@@ -149,7 +155,23 @@
           <button data-sel="tb-addCol" class="txt" title="열 추가" hidden>+열</button>
           <button data-sel="tb-delCol" class="txt" title="마지막 열 삭제" hidden>−열</button>
           <span class="sel-colors"></span>
-          <button data-sel="clear" title="선택 해제"><svg><use href="#i-close"/></svg></button>
+          <button data-sel="clear" title="선택 해제 (Esc)"><svg><use href="#i-close"/></svg></button>
+          <div class="sel-sub" id="selSub" hidden>
+            <span class="sel-sub-label">순서</span>
+            <button data-sel="z-front" class="txt" title="맨 앞으로 (Ctrl+Shift+])">맨앞</button>
+            <button data-sel="z-forward" class="txt" title="앞으로 (Ctrl+])">앞</button>
+            <button data-sel="z-backward" class="txt" title="뒤로 (Ctrl+[)">뒤</button>
+            <button data-sel="z-back" class="txt" title="맨 뒤로 (Ctrl+Shift+[)">맨뒤</button>
+            <span class="sel-sub-label al">정렬</span>
+            <button data-sel="al-left" class="al" title="왼쪽 맞춤"><svg viewBox="0 0 20 20"><path d="M3 2v16" /><rect x="5" y="4" width="10" height="4" /><rect x="5" y="11" width="6" height="4" /></svg></button>
+            <button data-sel="al-hcenter" class="al" title="가로 가운데"><svg viewBox="0 0 20 20"><path d="M10 2v16" /><rect x="4" y="4" width="12" height="4" /><rect x="6" y="11" width="8" height="4" /></svg></button>
+            <button data-sel="al-right" class="al" title="오른쪽 맞춤"><svg viewBox="0 0 20 20"><path d="M17 2v16" /><rect x="5" y="4" width="10" height="4" /><rect x="9" y="11" width="6" height="4" /></svg></button>
+            <button data-sel="al-top" class="al" title="위쪽 맞춤"><svg viewBox="0 0 20 20"><path d="M2 3h16" /><rect x="4" y="5" width="4" height="10" /><rect x="11" y="5" width="4" height="6" /></svg></button>
+            <button data-sel="al-vcenter" class="al" title="세로 가운데"><svg viewBox="0 0 20 20"><path d="M2 10h16" /><rect x="4" y="4" width="4" height="12" /><rect x="11" y="6" width="4" height="8" /></svg></button>
+            <button data-sel="al-bottom" class="al" title="아래쪽 맞춤"><svg viewBox="0 0 20 20"><path d="M2 17h16" /><rect x="4" y="5" width="4" height="10" /><rect x="11" y="9" width="4" height="6" /></svg></button>
+            <button data-sel="al-hdist" class="al dist" title="가로 간격 같게 (3개 이상)"><svg viewBox="0 0 20 20"><path d="M2 3v14M18 3v14" /><rect x="5" y="6" width="3" height="8" /><rect x="12" y="6" width="3" height="8" /></svg></button>
+            <button data-sel="al-vdist" class="al dist" title="세로 간격 같게 (3개 이상)"><svg viewBox="0 0 20 20"><path d="M3 2h14M3 18h14" /><rect x="6" y="5" width="8" height="3" /><rect x="6" y="12" width="8" height="3" /></svg></button>
+          </div>
         </div>
         <textarea id="textEditor" class="text-editor" data-ui hidden spellcheck="false" rows="1"></textarea>
         <div id="zoomBadge" class="zoom-badge" hidden>100%</div>
@@ -306,6 +328,7 @@
     <div class="qm-actions">
       <button data-qm="undo"><svg><use href="#i-undo"/></svg><span>실행 취소</span></button>
       <button data-qm="redo"><svg><use href="#i-redo"/></svg><span>다시 실행</span></button>
+      <button data-qm="paste" hidden><svg><use href="#i-copy"/></svg><span>여기에 붙여넣기</span></button>
     </div>
     <div class="qm-src muted" id="qmSrc"></div>
   </div>

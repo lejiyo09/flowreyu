@@ -175,6 +175,14 @@ body.drag-over #library .lib-body { outline: 3px dashed var(--accent); outline-o
   position: absolute; display: flex; align-items: center; gap: 2px; padding: 4px; pointer-events: auto;
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
 }
+.sel-menu { flex-wrap: wrap; max-width: min(640px, calc(100vw - 12px)); }
+.sel-menu .sel-count { font-size: 12px; font-weight: 700; color: var(--muted); padding: 0 4px 0 6px; white-space: nowrap; }
+.sel-menu button.txt.on { background: var(--accent-soft); }
+.sel-sub { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 2px; border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; }
+.sel-sub[hidden] { display: none; }
+.sel-sub-label { font-size: 11px; color: var(--muted); padding: 0 4px 0 6px; }
+.sel-sub button.al svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+.sel-sub button.al svg rect { fill: var(--accent-soft); stroke: var(--accent); }
 .sel-menu button { width: 38px; height: 38px; border: 0; background: none; border-radius: 8px; display: grid; place-items: center; }
 .sel-menu button:hover { background: var(--surface-2); }
 .sel-menu [data-sel="delete"] { color: var(--danger); }

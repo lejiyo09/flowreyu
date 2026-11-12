@@ -6,6 +6,7 @@ import {
   insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES, inactiveIds, layerUsable, noteAttached,
 } from './ink.js';
 import { uid, dist, now } from './util.js';
+import { expandGroups, cloneItems } from './arrange.js';
 
 export class ToolController {
   constructor(viewer, app) {
@@ -13,6 +14,7 @@ export class ToolController {
     this.app = app; // { doc(), onSelection(sel), editText(page, item, x, y), toast }
     this.cur = null; // 현재 동작 중인 도구 세션
     this.selection = null; // {page, ids:Set}
+    this.addMode = false; // 선택 추가 모드: 탭하면 넣고/빼기, 올가미는 더하기 (메뉴 ＋ 버튼 또는 Shift)
     this._liveRaf = 0;
     this.tools = {
       pen: new PenTool(this, 'pen'),
@@ -137,12 +139,14 @@ export class ToolController {
 
   // ── 선택(올가미) ──
   setSelection(sel) {
-    // 포스트잇을 고르면 그 위에 쓴 필기도 함께 (같이 옮겨지고 지워짐)
+    // 포스트잇을 고르면 그 위에 쓴 필기도 함께 (같이 옮겨지고 지워짐), 묶인 객체는 그룹 전체
     if (sel && sel.ids.size && this.doc) {
       const items = this.doc.items(sel.page);
+      sel = { ...sel, ids: expandGroups(items, sel.ids) };
       for (const it of items) if (it.t === 'nt' && sel.ids.has(it.id)) for (const id of noteAttached(items, it)) sel.ids.add(id);
     }
     this.selection = sel && sel.ids.size ? sel : null;
+    if (!this.selection) this.addMode = false;
     this.viewer.selection = this.selection ? { page: this.selection.page, ids: this.selection.ids, m: null } : null;
     this.app.onSelection(this.selection);
     this.viewer.requestInk();
@@ -172,10 +176,8 @@ export class ToolController {
   duplicateSelection() {
     const sel = this.selection;
     if (!sel) return;
-    const copies = [];
-    for (const it of this.doc.items(sel.page)) {
-      if (sel.ids.has(it.id)) copies.push({ ...transformItem(it, { s: 1, ox: 0, oy: 0, dx: 16, dy: 16 }), id: uid(it.t) });
-    }
+    // 복사본은 새 id, 그룹이었으면 복사본끼리 새 그룹 (원본 그룹에 섞이지 않게)
+    const copies = cloneItems(this.doc.items(sel.page).filter((it) => sel.ids.has(it.id)), 16, 16);
     this.doc.setItems(sel.page, [...this.doc.items(sel.page), ...copies]);
     this.setSelection({ page: sel.page, ids: new Set(copies.map((c) => c.id)) });
   }
@@ -415,7 +417,9 @@ class LassoTool {
     const v = this.ctl.viewer;
     v.liveCanvas.style.mixBlendMode = 'normal';
     const box = this.screenBox();
-    if (box) {
+    c.adding = !!(this.ctl.selection && (this.ctl.addMode || ev.shift)); // 추가 모드: 옮기기 대신 넣고/빼기
+    if (c.adding) c.page = this.ctl.selection.page;
+    if (box && !c.adding) {
       const pad = 8;
       // 위 가운데 회전 손잡이 → 상자 중심 기준 돌리기
       if (dist(ev.sx, ev.sy, box.x + box.w / 2, box.y - ROT_DY) <= HANDLE) {
@@ -507,17 +511,32 @@ class LassoTool {
         // 탭: 그 위치의 객체 하나 선택
         const p = { x: c.poly[0], y: c.poly[1] };
         const items = this.ctl.doc.items(c.page);
+        const off = inactiveIds(items);
         for (let i = items.length - 1; i >= 0; i--) {
-          if (hitTest(items[i], p.x, p.y, 6 / v.cam.z)) { this.ctl.setSelection({ page: c.page, ids: new Set([items[i].id]) }); return; }
+          if (off?.has(items[i].id) || !hitTest(items[i], p.x, p.y, 6 / v.cam.z)) continue;
+          if (!c.adding) { this.ctl.setSelection({ page: c.page, ids: new Set([items[i].id]) }); return; }
+          // 추가 모드: 이미 고른 것이면 빼고(그룹·포스트잇 위 필기째), 아니면 더함
+          const cur = this.ctl.selection.ids;
+          const hit = expandGroups(items, new Set([items[i].id]));
+          if (items[i].t === 'nt') for (const id of noteAttached(items, items[i])) hit.add(id);
+          const next = new Set(cur);
+          if (cur.has(items[i].id)) for (const id of hit) next.delete(id); else for (const id of hit) next.add(id);
+          const keep = this.ctl.addMode;
+          this.ctl.setSelection({ page: c.page, ids: next });
+          if (this.ctl.selection) this.ctl.addMode = keep;
+          return;
         }
         return;
       }
-      const ids = new Set();
+      const ids = new Set(c.adding ? this.ctl.selection.ids : []);
       const all = this.ctl.doc.items(c.page);
       const folded = inactiveIds(all); // 숨김·잠금 레이어는 선택 안 됨
+      const before = ids.size;
       for (const it of all) if (!(folded && folded.has(it.id)) && insideLasso(it, c.poly)) ids.add(it.id);
+      const keep = this.ctl.addMode;
       this.ctl.setSelection({ page: c.page, ids });
-      if (!ids.size) this.ctl.app.toast?.('선택된 필기가 없습니다');
+      if (this.ctl.selection && c.adding) this.ctl.addMode = keep;
+      if (ids.size === before) this.ctl.app.toast?.(c.adding ? '더 고른 필기가 없습니다' : '선택된 필기가 없습니다');
       return;
     }
     // 이동/크기 변경 확정

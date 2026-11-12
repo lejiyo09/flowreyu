@@ -13,9 +13,10 @@ import { mightHaveGalleryInk, extractGalleryInk } from './gallery.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, transcribeRequest, parseTranscript, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { CanvasEngine } from './canvas-engine.js';
+import { groupItems, ungroupItems, groupInfo, reorder, alignItems, selectionUnits, nudgeItems, cloneItems } from './arrange.js';
 import { ScrollEngine, contentBottom } from './scroll-engine.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsIntersect } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest, linkHit } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest, linkHit, inactiveIds } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -1336,7 +1337,7 @@ $('#btnNote').addEventListener('click', () => insertNote());
 document.addEventListener('paste', (e) => {
   if (state.screen !== 'editor' || state.editing || e.target.closest?.('input, textarea')) return;
   const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'));
-  if (f) { e.preventDefault(); insertImageFile(f); }
+  if (f) { e.preventDefault(); pendingClipPaste = false; insertImageFile(f); }
 });
 $('#viewport').addEventListener('dragover', (e) => { if (state.doc) e.preventDefault(); });
 $('#viewport').addEventListener('drop', (e) => {
@@ -2337,6 +2338,29 @@ document.addEventListener('keydown', (e) => {
   if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? doRedo() : doUndo(); }
   else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); doRedo(); }
   else if ((e.key === 'Delete' || e.key === 'Backspace') && tools.selection) { e.preventDefault(); tools.deleteSelection(); }
+  else if (mod && e.key.toLowerCase() === 'a') { e.preventDefault(); selectAll(); }
+  else if (mod && e.key.toLowerCase() === 'c' && tools.selection) { e.preventDefault(); copySelection(false); }
+  else if (mod && e.key.toLowerCase() === 'x' && tools.selection) { e.preventDefault(); copySelection(true); }
+  else if (mod && e.key.toLowerCase() === 'v' && clip) {
+    // 시스템 클립보드에 그림이 있으면 그 그림(paste 이벤트)이 먼저, 없으면 앱 안에서 복사한 객체
+    pendingClipPaste = true;
+    setTimeout(() => { if (pendingClipPaste) { pendingClipPaste = false; pasteClip(); } }, 40);
+  }
+  else if (mod && e.key.toLowerCase() === 'd' && tools.selection) { e.preventDefault(); tools.duplicateSelection(); }
+  else if (mod && e.key.toLowerCase() === 'g' && tools.selection) { e.preventDefault(); arrangeSelection(e.shiftKey ? 'ungroup' : 'group'); }
+  else if (mod && (e.code === 'BracketRight' || e.code === 'BracketLeft') && tools.selection) {
+    e.preventDefault();
+    const up = e.code === 'BracketRight';
+    arrangeSelection(e.shiftKey ? (up ? 'z-front' : 'z-back') : (up ? 'z-forward' : 'z-backward'));
+  }
+  else if (e.key.startsWith('Arrow') && tools.selection) {
+    // 화살표: 1pt, Shift+화살표: 10pt
+    e.preventDefault();
+    const k = e.shiftKey ? 10 : 1, sel = tools.selection;
+    const dx = e.key === 'ArrowLeft' ? -k : e.key === 'ArrowRight' ? k : 0, dy = e.key === 'ArrowUp' ? -k : e.key === 'ArrowDown' ? k : 0;
+    state.doc.setItems(sel.page, nudgeItems(state.doc.items(sel.page), sel.ids, dx, dy));
+    tools.setSelection({ page: sel.page, ids: new Set(sel.ids) });
+  }
   else if (e.key === 'Escape') { tools.clearSelection(); closeQuickMenu(); closeToolPopup(); }
   else if (e.key === 'PageDown') viewer.goToPage(viewer.currentPage() + 1);
   else if (e.key === 'PageUp') viewer.goToPage(viewer.currentPage() - 1);
@@ -2682,8 +2706,10 @@ function runAction(action, sx, sy, source) {
 
 // ───────────────────────────── S Pen 빠른 메뉴 ─────────────────────────────
 
+let qmAt = null; // 빠른 메뉴를 연 화면 위치 (붙여넣기 자리)
 function openQuickMenu(sx, sy, source) {
   if (state.screen !== 'editor') return;
+  qmAt = { x: sx, y: sy };
   closeToolPopup();
   commitTextEdit();
   const m = $('#quickMenu');
@@ -2717,18 +2743,21 @@ function renderQuickMenu() {
   }
   document.querySelector('[data-qm=undo]').disabled = !state.doc?.canUndo();
   document.querySelector('[data-qm=redo]').disabled = !state.doc?.canRedo();
+  document.querySelector('[data-qm=paste]').hidden = !clip;
 }
 for (const b of document.querySelectorAll('#quickMenu [data-tool]')) {
   b.addEventListener('click', () => { selectTool(b.dataset.tool); closeQuickMenu(); });
 }
 document.querySelector('[data-qm=undo]').addEventListener('click', () => { doUndo(); renderQuickMenu(); });
 document.querySelector('[data-qm=redo]').addEventListener('click', () => { doRedo(); renderQuickMenu(); });
+document.querySelector('[data-qm=paste]').addEventListener('click', () => { closeQuickMenu(); pasteClip(qmAt); });
 
 // ───────────────────────────── 선택 상자 ─────────────────────────────
 
 let selState = null;
 function renderSelection(sel, dragging, m) {
   selState = sel ? { sel, dragging, m } : null;
+  if (!sel) $('#selSub').hidden = true; // 순서·정렬 줄은 선택이 끝나면 접음
   positionOverlays();
 }
 
@@ -2772,6 +2801,15 @@ function positionOverlays() {
         menu.querySelector('[data-sel=ital]').classList.toggle('on', texty.length > 0 && texty.every((i) => i.i));
         const oneTable = selItems.length === 1 && selItems[0].t === 'tb';
         menu.querySelectorAll('[data-sel^=tb-]').forEach((b) => { b.hidden = !oneTable; });
+        // 개수·추가 모드·묶기·정렬 (정렬은 덩어리 2개 이상, 간격은 3개 이상)
+        $('#selCount').textContent = `${selItems.length}개`;
+        menu.querySelector('[data-sel=add]').classList.toggle('on', tools.addMode);
+        const gi = groupInfo(pageItems, sel.ids);
+        menu.querySelector('[data-sel=group]').hidden = !gi.canGroup;
+        menu.querySelector('[data-sel=ungroup]').hidden = !gi.grouped;
+        const units = selectionUnits(pageItems, sel.ids).length;
+        menu.querySelectorAll('.sel-sub .al').forEach((b) => { b.hidden = units < (b.classList.contains('dist') ? 3 : 2); });
+        menu.querySelector('[data-sel=more]').classList.toggle('on', !$('#selSub').hidden);
         const notes = selItems.filter((i) => i.t === 'nt');
         const fb = menu.querySelector('[data-sel=fold]');
         fb.hidden = !notes.length;
@@ -2791,6 +2829,14 @@ $('#selMenu').addEventListener('click', (e) => {
   if (a === 'delete') tools.deleteSelection();
   if (a === 'dup') tools.duplicateSelection();
   if (a === 'clear') tools.clearSelection();
+  if (a === 'add') {
+    tools.addMode = !tools.addMode;
+    if (tools.addMode) toast('선택 추가: 객체를 탭하면 넣고 빼고, 올가미로 둘러싸면 더합니다', { ms: 2200 });
+    renderSelection(tools.selection);
+  }
+  if (a === 'copy') copySelection(false);
+  if (a === 'more') { $('#selSub').hidden = !$('#selSub').hidden; renderSelection(tools.selection); }
+  if (a === 'group' || a === 'ungroup' || a?.startsWith('z-') || a?.startsWith('al-')) arrangeSelection(a);
   if (a === 'fold') {
     const sel = tools.selection;
     if (!sel) return;
@@ -2813,6 +2859,77 @@ $('#selMenu').addEventListener('click', (e) => {
     if (it) { tools.clearSelection(); startTextEdit(sel.page, it, undefined, undefined, it.t === 'tb' ? { cell: { r: 0, c: 0 } } : {}); }
   }
 });
+
+/** 묶기·풀기·순서·정렬: 선택은 그대로 두고 배열만 바꿈 (실행 취소 한 번) */
+function arrangeSelection(a) {
+  const sel = tools.selection;
+  if (!sel) return;
+  const items = state.doc.items(sel.page);
+  let next = items;
+  if (a === 'group') next = groupItems(items, sel.ids);
+  else if (a === 'ungroup') next = ungroupItems(items, sel.ids);
+  else if (a.startsWith('z-')) next = reorder(items, sel.ids, a.slice(2));
+  else if (a.startsWith('al-')) next = alignItems(items, sel.ids, a.slice(3));
+  if (next !== items) state.doc.setItems(sel.page, next);
+  tools.setSelection({ page: sel.page, ids: new Set(sel.ids) });
+  if (a === 'group') toast('묶었습니다 · 하나를 고르면 함께 선택됩니다', { ms: 1600 });
+}
+
+// ── 앱 안 클립보드: 다른 페이지·다른 노트에 붙여넣기 ──
+let clip = null; // {docId, page, items, box, n(같은 자리에 붙여 넣은 횟수)}
+let pendingClipPaste = false;
+function copySelection(cut) {
+  const sel = tools.selection;
+  if (!sel) return;
+  const items = state.doc.items(sel.page).filter((i) => sel.ids.has(i.id));
+  if (!items.length) return;
+  const box = tools.selectionBBox();
+  clip = { docId: state.doc.id, page: sel.page, items, box, n: 0 };
+  if (cut) tools.deleteSelection();
+  toast(`${items.length}개를 ${cut ? '잘라냈' : '복사했'}습니다 · Ctrl+V 또는 길게 눌러 "붙여넣기"`, { ms: 1800 });
+}
+/** at: 화면 좌표(그 자리 가운데에) — 없으면 원래 자리에서 조금 비켜서, 다른 페이지·노트면 화면 가운데 */
+async function pasteClip(at) {
+  const d = state.doc;
+  if (!clip || !d) return;
+  let page, dx, dy;
+  const cx = clip.box.x + clip.box.w / 2, cy = clip.box.y + clip.box.h / 2;
+  const hit = at ? viewer.pageAtScreen(at.x, at.y) : null;
+  if (hit) { page = hit.page; dx = hit.x - cx; dy = hit.y - cy; }
+  else if (clip.docId === d.id && viewer.visiblePages().some((p) => p.index === clip.page)) { page = clip.page; clip.n++; dx = dy = 16 * clip.n; }
+  else { const c = placeAt(); page = c.page; dx = c.x - cx; dy = c.y - cy; }
+  let copies = cloneItems(clip.items, dx, dy);
+  // 다른 노트의 그림: 그림 파일도 이 노트 것으로 복사 (원래 노트를 지워도 남도록)
+  if (clip.docId !== d.id) {
+    const map = new Map();
+    for (const it of copies) {
+      if (it.t !== 'im' || map.has(it.blob)) continue;
+      const rec = await store.getBlob(it.blob).catch(() => null);
+      if (!rec) continue;
+      const nid = uid('img');
+      await store.putBlob({ ...rec, id: nid, docId: d.id });
+      map.set(it.blob, nid);
+    }
+    copies = copies.filter((it) => it.t !== 'im' || map.has(it.blob)).map((it) => (it.t === 'im' ? { ...it, blob: map.get(it.blob) } : it));
+  }
+  if (d.activeLayer) copies = copies.map((it) => ({ ...it, ly: d.activeLayer })); // 지금 레이어에
+  d.setItems(page, [...d.items(page), ...copies]);
+  selectAfterInsert(page, copies[0].id);
+  tools.setSelection({ page, ids: new Set(copies.map((c) => c.id)) });
+}
+
+/** 지금 페이지의 (숨김·잠금 레이어가 아닌) 객체 모두 선택 */
+function selectAll() {
+  const d = state.doc;
+  if (!d) return;
+  const page = viewer.currentPage();
+  const items = d.items(page);
+  const off = inactiveIds(items);
+  const ids = new Set(items.filter((i) => !off?.has(i.id)).map((i) => i.id));
+  if (!ids.size) return;
+  selectTool('lasso');
+  tools.setSelection({ page, ids });
+}
 
 /** 표 행·열 추가/삭제 (칸 크기 유지: 표가 그만큼 커지거나 작아짐). 실행 취소 가능 */
 function tableEdit(page, id, a) {

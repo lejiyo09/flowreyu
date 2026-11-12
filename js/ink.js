@@ -987,6 +987,8 @@ export function sanitizeItem(raw) {
     if (raw.i === true) it.i = true;
     if (it.t === 'nt' && typeof raw.tc === 'string' && COLOR_RE.test(raw.tc)) it.tc = raw.tc;
   }
+  // 그룹(묶기) id 유지
+  if (it && typeof raw.gp === 'string' && /^g\w{1,40}$/.test(raw.gp)) it.gp = raw.gp;
   // 레이어 id 유지
   if (it && typeof raw.ly === 'string' && /^L\w{1,40}$/.test(raw.ly) && raw.ly !== DEFAULT_LAYER) it.ly = raw.ly;
   return it;
