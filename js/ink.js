@@ -159,7 +159,8 @@ function computeBBox(item) {
   if (item.t === 'cl') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: checkHeight(item) + bh }; } // 위쪽 손잡이 띠 포함
   if (item.t === 'tb') { const bh = objBarH(item), cs = tableCtlSize(item) + 3; return { x: item.x, y: item.y - bh, w: item.w + cs, h: item.h + bh + cs }; } // 위쪽 손잡이 띠 + 아래·오른쪽 ＋ 버튼 포함
   if (item.t === 'im') { const bh = objBarH(item); return { x: item.x, y: item.y - bh, w: item.w, h: item.h + bh }; } // 위쪽 손잡이 띠 포함
-  if (item.t === 'ln' || item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
+  if (item.t === 'ln') { const L = linkLabelRect(item); return { x: item.x, y: L.y, w: item.w, h: item.h + L.h }; } // 위쪽 이름표 포함
+  if (item.t === 'nt') return { x: item.x, y: item.y, w: item.w, h: item.h };
   return { x: 0, y: 0, w: 0, h: 0 };
 }
 
@@ -717,8 +718,38 @@ function wrapText(ctx, text, maxW) {
 
 export function linkLabel(item) {
   if (item.to?.url) { try { return '🔗 ' + new URL(item.to.url).hostname; } catch { return '🔗 ' + item.to.url; } }
+  if (Number.isInteger(item.to?.sheet)) return `→ ${item.to.sheet + 1}쪽`; // 무한 스크롤의 인쇄 페이지
   if (Number.isInteger(item.to?.page)) return `→ ${item.to.page + 1}쪽`;
   return '⚠ 대상 없음';
+}
+
+/**
+ * 링크 위쪽 파란 이름표: 글자·영역. 폭은 링크 폭을 넘지 않고(넘치면 … 로 줄임) 화면에 그리는 영역과 누르는 영역이 같다
+ * → {text, fs, x, y, w, h} (페이지 좌표). 결과는 객체마다 캐시
+ */
+export function linkLabelRect(item) {
+  const e = entry(item);
+  if (e.label) return e.label;
+  if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+  const fs = Math.max(5, Math.min(9, item.h * 0.6));
+  measureCtx.font = `${fs}px ${TEXT_FONT}`;
+  const maxW = Math.max(item.w, fs * 2);
+  let text = linkLabel(item);
+  if (measureCtx.measureText(text).width + 4 > maxW) {
+    const chars = [...text];
+    while (chars.length > 1 && measureCtx.measureText(chars.join('') + '…').width + 4 > maxW) chars.pop();
+    text = chars.join('') + '…';
+  }
+  const w = Math.min(maxW, measureCtx.measureText(text).width + 4);
+  e.label = { text, fs, x: item.x, y: item.y - fs - 3, w, h: fs + 3 };
+  return e.label;
+}
+
+/** 링크를 누른 것인지: 점선 사각형 안 또는 이름표 위 */
+export function linkHit(item, x, y) {
+  const L = linkLabelRect(item);
+  return (x >= item.x && x <= item.x + item.w && y >= item.y && y <= item.y + item.h)
+    || (x >= L.x && x <= L.x + L.w && y >= L.y && y <= L.y + L.h);
 }
 
 function drawLink(ctx, item) {
@@ -729,15 +760,13 @@ function drawLink(ctx, item) {
   ctx.strokeStyle = 'rgba(52,120,246,0.85)';
   ctx.strokeRect(item.x, item.y, item.w, item.h);
   ctx.setLineDash([]);
-  const fs = Math.max(5, Math.min(9, item.h * 0.6));
-  ctx.font = `${fs}px ${TEXT_FONT}`;
+  const L = linkLabelRect(item);
+  ctx.font = `${L.fs}px ${TEXT_FONT}`;
   ctx.textBaseline = 'top';
-  const label = linkLabel(item);
-  const tw = ctx.measureText(label).width + 4;
   ctx.fillStyle = 'rgba(52,120,246,0.9)';
-  ctx.fillRect(item.x, item.y - fs - 3, Math.min(tw, Math.max(item.w, tw)), fs + 3);
+  ctx.fillRect(L.x, L.y, L.w, L.h);
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(label, item.x + 2, item.y - fs - 1.5);
+  ctx.fillText(L.text, L.x + 2, L.y + 1.5);
 }
 
 export const isHighlighter = (item) => item.t === 's' && item.tool === 'hl';
@@ -1011,7 +1040,7 @@ function sanitizeItem0(raw) {
     if (![raw.x, raw.y, raw.w, raw.h].every(fin) || raw.w <= 0 || raw.h <= 0) return null;
     const to = raw.to && typeof raw.to === 'object' ? raw.to : {};
     const clean = typeof to.url === 'string' && /^(https?:|mailto:|tel:)/i.test(to.url) ? { url: to.url }
-      : Number.isInteger(to.page) && to.page >= 0 ? { page: to.page } : {};
+      : Number.isInteger(to.page) && to.page >= 0 ? { page: to.page, ...(Number.isInteger(to.sheet) && to.sheet >= 0 && fin(to.y) ? { sheet: to.sheet, y: to.y } : {}) } : {};
     return { id, t: 'ln', x: raw.x, y: raw.y, w: raw.w, h: raw.h, to: clean };
   }
   return null;

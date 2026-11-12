@@ -113,6 +113,7 @@ function addLinkAnnot(pdf, pages, page, inv, it) {
   const xs = cs.map((c) => c[0]), ys = cs.map((c) => c[1]);
   const dict = { Type: 'Annot', Subtype: 'Link', Rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], Border: [0, 0, 0] };
   if (it.to?.url) dict.A = { Type: 'Action', S: 'URI', URI: PDFString.of(it.to.url) };
+  else if (Number.isInteger(it.to?.sheet) && pages[it.to.sheet]) dict.Dest = [pages[it.to.sheet].ref, PDFName.of('Fit')]; // 무한 스크롤: 시트 = 내보낸 PDF 페이지
   else if (Number.isInteger(it.to?.page) && pages[it.to.page]) dict.Dest = [pages[it.to.page].ref, PDFName.of('Fit')];
   else return;
   page.node.addAnnot(pdf.context.register(pdf.context.obj(dict)));

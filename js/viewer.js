@@ -365,7 +365,7 @@ export class Viewer extends Emitter {
           const [x1, y1] = T(a.rect[0], a.rect[1]), [x2, y2] = T(a.rect[2], a.rect[3]);
           return { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1), url: a.url || a.unsafeUrl || null, dest: a.dest || null };
         });
-      })().catch((e) => { console.warn('links', e); return []; });
+      })().catch((e) => { console.warn('links', e); return []; }).then((l) => { p.links = l; return l; }); // p.links: 동기 조회용 (마우스 커서)
     }
     return p.linksP;
   }
@@ -457,6 +457,8 @@ export class Viewer extends Emitter {
           catch (e) { if (e?.name !== 'RenderingCancelledException') console.warn('render', e); }
         }
         this._releaseFar();
+        // 보이는 페이지의 PDF 링크를 미리 읽어 둔다 (마우스로 쓰는 중에도 첫 클릭부터 링크로 인식하도록)
+        for (const p of this.visiblePages()) if (!p.linksP) this.pdfLinks(p.index);
       } while (this._again);
     } finally {
       this.renderBusy = false;

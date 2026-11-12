@@ -15,7 +15,7 @@ import { InputDebugger } from './debug.js';
 import { CanvasEngine } from './canvas-engine.js';
 import { ScrollEngine, contentBottom } from './scroll-engine.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsIntersect } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest, linkHit } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.0.0';
@@ -80,6 +80,8 @@ const app = {
     selectTool(toolBeforeEraser || 'pen');
   },
   tap: (sx, sy) => followLinkAt(sx, sy),
+  linkAt: (sx, sy) => linkAtScreen(sx, sy), // 마우스: 링크 위에서 손가락 모양 커서, 그리기 모드의 클릭
+  hoverAt: (sx, sy) => { $('#viewport').classList.toggle('over-link', !!linkAtScreen(sx, sy)); },
   tapObjectAt: (page, x, y) => tapObjectAt(page, x, y),
   noteDragStart: (sx, sy) => noteDragStart(sx, sy),
   noteDragMove: (sx, sy) => noteDragMove(sx, sy),
@@ -587,10 +589,30 @@ $('#newNoteDlg').addEventListener('close', async () => {
 
 // ───────────────────────────── 문서 열기 / 닫기 ─────────────────────────────
 
+/**
+ * 닫기 전에 필기가 모두 저장됐는지 확인. 저장에 실패하면 다시 시도 / 백업 내려받기 / 저장하지 않고 닫기 / 계속 편집 중에서 고른다.
+ * 닫아도 되면 true (저장 성공, 또는 사용자가 버리기로 함)
+ */
+async function ensureSaved(doc) {
+  for (;;) {
+    if (await doc.flush().catch(() => false)) return true;
+    const dlg = $('#saveFailDlg');
+    $('#sfReason').textContent = store.describeError(doc.saveError);
+    dlg.showModal();
+    const choice = await new Promise((res) => dlg.addEventListener('close', () => res(dlg.returnValue), { once: true }));
+    if (choice === 'backup') { await exportBackup(doc).catch((e) => toast('백업 실패: ' + (e?.message || e), { error: true })); continue; }
+    if (choice === 'discard') { if (confirm('저장하지 못한 필기는 사라집니다. 그래도 닫을까요?')) return true; continue; }
+    if (choice === 'retry') continue;
+    return false; // 계속 편집
+  }
+}
+
+/** 문서 닫기. 저장하지 못해 닫지 않았으면 false (화면 그대로) */
 async function closeDoc() {
   if (recorder.recording) await stopRecording(); // 녹음 중이면 먼저 저장
-  stopPlayback(true);
   commitTextEdit();
+  if (state.doc && !(await ensureSaved(state.doc))) return false;
+  stopPlayback(true);
   tools.cancel();
   tools.clearSelection();
   input.resetAll('close');
@@ -600,8 +622,7 @@ async function closeDoc() {
   if (doc) {
     saveView.flush();
     if (viewer.surface && (doc.undoStack.length || !doc.meta.thumb)) await saveSurfaceThumb(doc).catch(() => {});
-    const ok = await doc.close().catch(() => false);
-    if (!ok && doc.saveState === 'error') toast('일부 필기를 저장하지 못했습니다', { error: true });
+    await doc.close({ force: true }).catch(() => false); // 위에서 저장을 확인했거나 버리기로 한 경우
   }
   viewer.close();
   thumbs.clear();
@@ -609,6 +630,7 @@ async function closeDoc() {
   backAnchor = null;
   if (state.pdf) { state.pdf.destroy().catch(() => {}); }
   state.doc = null; state.pdf = null; state.blob = null;
+  return true;
 }
 
 /** 무한 캔버스·무한 스크롤 문서 열기 */
@@ -684,7 +706,7 @@ async function saveSurfaceThumb(doc) {
 async function openDoc(id) {
   busy('문서 여는 중…');
   try {
-    await closeDoc();
+    if (!(await closeDoc())) { busy(null); return; }
     const meta = await store.getDoc(id);
     if (!meta) throw new Error('문서를 찾을 수 없습니다');
     if (KIND_LABEL[meta.kind]) { await openSurfaceDoc(meta); busy(null); return; }
@@ -734,7 +756,7 @@ function wireDoc(doc) {
 }
 
 $('#btnBack').addEventListener('click', async () => {
-  await closeDoc();
+  if (!(await closeDoc())) return; // 저장 실패 → 편집 화면에 그대로
   await store.kvDel('lastDoc').catch(() => {});
   showScreen('library');
   renderLibrary();
@@ -2117,6 +2139,31 @@ renderClock();
 // ───────────────────────────── 링크 ─────────────────────────────
 
 let backAnchor = null;
+
+/** 화면 점의 사용자 링크(맨 위) 또는 이미 읽어 둔 PDF 링크. 없으면 null (마우스 커서·클릭용, 동기) */
+function linkAtScreen(sx, sy) {
+  if (!state.doc) return null;
+  const hit = viewer.pageAtScreen(sx, sy, true);
+  if (!hit) return null;
+  const u = userLinkAt(hit.page, hit.x, hit.y);
+  if (u) return { to: u.to };
+  const pl = viewer.pages[hit.page]?.links; // pdfLinks() 가 읽어 둔 결과
+  if (!pl && !viewer.surface) viewer.pdfLinks(hit.page); // 다음 조회부터 쓰도록 읽기 시작
+  const l = pl?.find((r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h);
+  return l ? { pdf: l, page: hit.page } : null;
+}
+
+/** 페이지 좌표의 사용자 링크 (점선 사각형 또는 위쪽 이름표) */
+function userLinkAt(page, x, y) {
+  const items = state.doc.items(page);
+  const folded = foldHidden(items);
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.t === 'ln' && !layerHidden(it) && !folded?.has(it.id) && linkHit(it, x, y)) return it;
+  }
+  return null;
+}
+
 async function followLinkAt(sx, sy) {
   if (!state.doc) return;
   const hit = viewer.pageAtScreen(sx, sy, true);
@@ -2124,11 +2171,9 @@ async function followLinkAt(sx, sy) {
   if (tapObjectAt(hit.page, hit.x, hit.y)) return; // 손가락 탭으로도 포스트잇 접기/펼치기·체크
   if (player && seekToInkAt(hit.page, hit.x, hit.y)) return; // 녹음 재생 중: 탭한 필기를 쓰던 순간으로
   const inside = (r) => hit.x >= r.x && hit.x <= r.x + r.w && hit.y >= r.y && hit.y <= r.y + r.h;
-  const items = state.doc.items(hit.page);
-  const folded = foldHidden(items);
-  for (let i = items.length - 1; i >= 0; i--) {
-    if (items[i].t === 'ln' && !layerHidden(items[i]) && !folded?.has(items[i].id) && inside(items[i])) { followTarget(items[i].to); return; }
-  }
+  const u = userLinkAt(hit.page, hit.x, hit.y);
+  if (u) { followTarget(u.to); return; }
+  if (viewer.surface) return; // 무한 캔버스·스크롤에는 PDF 링크가 없음
   const links = await viewer.pdfLinks(hit.page);
   const l = links.find(inside);
   if (!l) return;
@@ -2143,14 +2188,16 @@ function followTarget(to) {
     return;
   }
   if (!Number.isInteger(to?.page) || !viewer.pages[to.page]) { toast('링크 대상 페이지가 없습니다 (삭제되었을 수 있음)'); return; }
+  const eng = viewer.surface;
   backAnchor = viewer.anchor();
+  const from = eng?.kind === 'scroll' ? eng.currentSheet(viewer) + 1 : backAnchor.page + 1;
   viewer.goToPage(to.page, to.y || 0);
   const chip = $('#backChip');
-  chip.querySelector('span').textContent = `돌아가기 (${backAnchor.page + 1}쪽)`;
+  chip.querySelector('span').textContent = `돌아가기 (${from}쪽)`;
   chip.hidden = false;
 }
 $('#backChip').addEventListener('click', () => {
-  if (backAnchor) viewer.restoreAnchor(backAnchor);
+  if (backAnchor) { if (viewer.surface) viewer.restoreView(backAnchor); else viewer.restoreAnchor(backAnchor); }
   backAnchor = null;
   $('#backChip').hidden = true;
 });
@@ -2162,37 +2209,72 @@ function setLinkKind(kind) {
   $('#lnPageRow').hidden = kind !== 'page';
   $('#lnUrlRow').hidden = kind !== 'url';
   lnEditing.kind = kind;
+  linkError(null);
+}
+/** 링크로 갈 수 있는 페이지 수: PDF 노트는 페이지, 무한 스크롤은 시트(인쇄 페이지), 무한 캔버스는 없음 */
+function linkPageCount() {
+  const eng = viewer.surface;
+  if (!eng) return viewer.pages.length;
+  return eng.kind === 'scroll' ? Math.round(viewer.pages[0].h / eng.sheetH) : 0;
+}
+function linkError(msg, input) {
+  const el = $('#lnErr');
+  el.textContent = msg || '';
+  el.hidden = !msg;
+  for (const i of [$('#lnPage'), $('#lnUrl')]) i.classList.toggle('err', !!msg && i === input);
+  if (msg && input) input.focus();
+}
+/** 입력 확인 → 링크 대상 {url} | {page[, sheet, y]}. 틀리면 오류를 보여 주고 null */
+function linkTarget() {
+  if (lnEditing.kind === 'url') {
+    let u = $('#lnUrl').value.trim();
+    if (!u) { linkError('주소를 입력하세요', $('#lnUrl')); return null; }
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(u)) u = 'https://' + u;
+    if (!/^(https?:|mailto:|tel:)/i.test(u)) { linkError('http(s), mailto, tel 주소만 쓸 수 있습니다', $('#lnUrl')); return null; }
+    if (/^https?:/i.test(u)) { try { if (!new URL(u).hostname.includes('.') && !/^https?:\/\/localhost/i.test(u)) throw 0; } catch { linkError('올바른 웹 주소가 아닙니다 (예: example.com)', $('#lnUrl')); return null; } }
+    return { url: u };
+  }
+  const max = linkPageCount();
+  const n = Number($('#lnPage').value);
+  if (!Number.isInteger(n) || n < 1 || n > max) { linkError(`1~${max} 사이의 페이지 번호를 입력하세요`, $('#lnPage')); return null; }
+  const eng = viewer.surface;
+  if (eng?.kind === 'scroll') return { page: 0, sheet: n - 1, y: (n - 1) * eng.sheetH };
+  return { page: n - 1 };
 }
 lnDlg.querySelectorAll('#lnKind button').forEach((b) => b.addEventListener('click', () => setLinkKind(b.value)));
 function editLink(page, item, rect) {
-  lnEditing = { page, item, rect, kind: item?.to?.url ? 'url' : 'page' };
-  $('#lnPage').max = viewer.pages.length;
-  $('#lnPage').value = Number.isInteger(item?.to?.page) ? item.to.page + 1 : '';
+  const pages = linkPageCount();
+  lnEditing = { page, item, rect, kind: item?.to?.url || !pages ? 'url' : 'page' };
+  lnDlg.querySelector('#lnKind button[value=page]').hidden = !pages; // 무한 캔버스: 웹 주소만
+  $('#lnPage').max = pages;
+  $('#lnPage').value = Number.isInteger(item?.to?.sheet) ? item.to.sheet + 1 : Number.isInteger(item?.to?.page) ? item.to.page + 1 : '';
   $('#lnUrl').value = item?.to?.url || '';
   $('#lnDelete').hidden = !item;
   setLinkKind(lnEditing.kind);
   lnDlg.showModal();
 }
+// 저장: 입력이 틀리면 창을 닫지 않는다 (입력한 내용·기존 링크 그대로)
+lnDlg.querySelector('form').addEventListener('submit', (e) => {
+  if (e.submitter?.value !== 'ok' || !lnEditing) return;
+  const to = linkTarget();
+  if (!to) { e.preventDefault(); return; }
+  lnEditing.to = to;
+});
+// 입력칸에서 Enter = 저장 (form 의 첫 버튼은 닫기라 기본 동작은 취소가 됨)
+for (const i of [$('#lnPage'), $('#lnUrl')]) {
+  i.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); lnDlg.querySelector('button[value=ok]').click(); } });
+  i.addEventListener('input', () => linkError(null));
+}
 lnDlg.addEventListener('close', () => {
   const ed = lnEditing, doc = state.doc;
   lnEditing = null;
+  linkError(null);
   if (!ed || !doc) return;
   const rv = lnDlg.returnValue;
   const items = doc.items(ed.page);
   if (rv === 'delete' && ed.item) { doc.setItems(ed.page, items.filter((i) => i.id !== ed.item.id)); return; }
-  if (rv !== 'ok') return;
-  let to;
-  if (ed.kind === 'url') {
-    let u = $('#lnUrl').value.trim();
-    if (!u) { toast('주소를 입력하세요'); return; }
-    if (!/^[a-z]+:/i.test(u)) u = 'https://' + u;
-    if (!/^(https?:|mailto:|tel:)/i.test(u)) { toast('http(s), mailto, tel 주소만 쓸 수 있습니다'); return; }
-    to = { url: u };
-  } else {
-    const n = parseInt($('#lnPage').value, 10);
-    if (!(n >= 1 && n <= viewer.pages.length)) { toast(`1~${viewer.pages.length} 사이의 페이지 번호를 입력하세요`); return; }
-    to = { page: n - 1 };
-  }
+  if (rv !== 'ok' || !ed.to) return;
+  const to = ed.to;
   if (ed.item) doc.setItems(ed.page, items.map((i) => (i.id === ed.item.id ? { ...i, to } : i)));
   else {
     // 포스트잇 위에 만든 링크는 포스트잇과 같은 레이어로 (포스트잇에 가려지지 않고 함께 움직이게)
@@ -3018,6 +3100,10 @@ $('#btnBackupExport').addEventListener('click', async () => {
   const d = state.doc;
   if (!d) return;
   await d.flush();
+  await exportBackup(d);
+});
+/** 필기 백업(JSON) 내려받기. 메모리의 필기로 만드므로 저장소에 쓰지 못하는 상태에서도 쓸 수 있다 */
+async function exportBackup(d) {
   const pages = {};
   for (const [p, items] of d.pages) if (items.length) pages[p] = items;
   // 첨부 그림도 백업 파일 안에 넣는다 (다른 기기로 옮겨도 그림이 따라가도록)
@@ -3033,7 +3119,7 @@ $('#btnBackupExport').addEventListener('click', async () => {
   a.download = `${d.meta.name}_필기백업.json`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-});
+}
 $('#btnBackupImport').addEventListener('click', () => $('#backupInput').click());
 $('#backupInput').addEventListener('change', async (e) => {
   const f = e.target.files[0];
@@ -3044,20 +3130,37 @@ $('#backupInput').addEventListener('change', async (e) => {
     const data = JSON.parse(await f.text());
     if (data.format !== 'flexnote-ink' || typeof data.pages !== 'object') throw new Error('FlexNote 필기 백업 파일이 아닙니다');
     if (!confirm(`백업의 필기를 현재 문서에 덮어쓸까요? (실행 취소 가능)`)) return;
-    for (const [id, im] of Object.entries(data.images || {})) {
-      const blob = await (await fetch(im.data)).blob();
-      await store.putBlob({ id, docId: d.id, data: blob, w: im.w, h: im.h });
-    }
-    // 백업의 레이어 목록도 복원 (없으면 지금 레이어 유지)
-    if (Array.isArray(data.layers) && data.layers.length) { d.meta.layers = data.layers; d.meta.activeLayer = null; initLayers(d); applyLayers(); }
-    d.begin();
+    // 1) 필기를 먼저 검사해 두고 (실패하면 아무것도 바뀌지 않음)
     let n = 0, bad = 0;
+    const parsed = [];
     for (let p = 0; p < viewer.pages.length; p++) {
       const raw = data.pages[p];
       const items = Array.isArray(raw) ? raw.map(sanitizeItem).filter((x) => x || (bad++, false)) : [];
       n += items.length;
-      if (items.length || d.items(p).length) d.setItems(p, items);
+      parsed.push(items);
     }
+    // 2) 첨부 그림은 새 id 로 저장 (백업의 id 를 그대로 쓰면 같은 id 를 가진 다른 노트의 그림을 덮어쓸 수 있음).
+    //    하나라도 실패하면 이번에 넣은 그림을 지우고 중단
+    const idMap = new Map(), added = [];
+    try {
+      for (const [id, im] of Object.entries(data.images || {})) {
+        const blob = await (await fetch(im.data)).blob();
+        const nid = uid('img');
+        await store.putBlob({ id: nid, docId: d.id, data: blob, w: im.w, h: im.h });
+        added.push(nid);
+        idMap.set(id, nid);
+      }
+    } catch (err) {
+      for (const id of added) await store.deleteBlob(id).catch(() => {});
+      throw new Error('그림을 저장하지 못해 가져오기를 취소했습니다 (' + store.describeError(err) + ')');
+    }
+    // 3) 필기의 그림 참조를 새 id 로 바꿔 한 번에 반영 (실행 취소 한 번으로 되돌림)
+    if (Array.isArray(data.layers) && data.layers.length) { d.meta.layers = data.layers; d.meta.activeLayer = null; initLayers(d); applyLayers(); }
+    d.begin();
+    parsed.forEach((items, p) => {
+      const fixed = items.map((it) => (it.t === 'im' && idMap.has(it.blob) ? { ...it, blob: idMap.get(it.blob) } : it));
+      if (fixed.length || d.items(p).length) d.setItems(p, fixed);
+    });
     d.commit();
     toast(`필기 ${n}개를 복원했습니다` + (bad ? ` (손상된 ${bad}개 제외)` : ''));
   } catch (err) { toast('백업을 읽을 수 없습니다: ' + err.message, { error: true }); }

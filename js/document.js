@@ -186,10 +186,12 @@ export class NoteDocument extends Emitter {
     return this.save();
   }
 
-  async close() {
+  /** 닫기: 저장에 성공하면 true. 실패하면 닫지 않고(다시 시도 계속) false. force: 실패해도 닫음 (사용자가 버리기로 한 경우) */
+  async close({ force = false } = {}) {
     if (this.tx) this.commit();
-    await this.flush();
-    this.closed = true;
+    const ok = await this.flush();
+    if (ok || force) this.closed = true;
+    return ok;
   }
 
   /**

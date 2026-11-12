@@ -146,6 +146,11 @@ body.drag-over #library .lib-body { outline: 3px dashed var(--accent); outline-o
 .page .pdf-base { left: 0; top: 0; width: 100%; height: 100%; }
 .layer { position: absolute; left: 0; top: 0; pointer-events: none; transform-origin: 0 0; }
 .layer.hl { mix-blend-mode: multiply; }
+.viewport.over-link { cursor: pointer; }
+.dlg-foot.wrap { flex-wrap: wrap; row-gap: 8px; }
+.dlg-foot.wrap .foot-gap { flex: 1 0 0; }
+.field-err { margin: 6px 0 0; color: var(--danger); font-size: 13px; }
+.dlg input.err { border-color: var(--danger); outline: 2px solid color-mix(in srgb, var(--danger) 35%, transparent); }
 /* 무한 캔버스: 뷰포트 전체가 종이. 무한 스크롤: 폭이 고정된 긴 종이 한 장 */
 .viewport.surface-canvas { background: #fff; }
 .surf-bg { height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface-2); color: inherit; font-size: 13px; padding: 0 4px; }

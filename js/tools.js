@@ -68,7 +68,7 @@ export class ToolController {
     if (!hit) return;
     // 녹음 중이면 이 획을 쓰기 시작한 녹음 시각 (재생할 때 필기 따라가기)
     const rt = this.app.recStamp?.() || null;
-    this.cur = { tool, name, override: !!ev.toolOverride, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy, rt };
+    this.cur = { tool, name, kind: ev.kind, override: !!ev.toolOverride, page: hit.page, t0: now(), sx0: ev.sx, sy0: ev.sy, path: 0, lastSx: ev.sx, lastSy: ev.sy, rt };
     tool.begin(this.cur, ev);
   }
 
@@ -96,6 +96,8 @@ export class ToolController {
     if (c.path < 6 && now() - c.t0 < 350) {
       const p = this.toPage(c.page, c.sx0, c.sy0);
       if (this.app.tapObjectAt?.(c.page, p.x, p.y)) { c.tool.cancel(c); this.viewer.clearLive(); return; }
+      // 마우스로 쓰는 중(설정 "마우스로 쓰기")에도 링크를 클릭하면 점 대신 링크로 이동 (링크 도구는 링크 편집)
+      if (c.kind === 'mouse' && c.name !== 'link' && this.app.linkAt?.(c.sx0, c.sy0)) { c.tool.cancel(c); this.viewer.clearLive(); this.app.tap?.(c.sx0, c.sy0); return; }
     }
     c.tool.end(c);
     // 지우개를 도구로 골라 한 번 쓴 경우 (펜 지우개 끝/버튼으로 잠깐 쓴 지우개는 제외)

@@ -710,22 +710,29 @@ class MouseInput {
     if (e.button === 0 && settings.get('mouseDraw')) { r.pen.onDown(e, 'mouse'); return; }
     if (e.button === 0 || e.button === 1) {
       const s = r.screen(e);
-      this.pan = { id: e.pointerId, x: s.x, y: s.y, cam: { ...r.viewer.cam } };
+      this.pan = { id: e.pointerId, x: s.x, y: s.y, cam: { ...r.viewer.cam }, t0: performance.now(), moved: false, left: e.button === 0 };
       try { r.el.setPointerCapture(e.pointerId); } catch { /* */ }
     }
   }
 
   onMove(e) {
     if (this.guide === e.pointerId) { const s = this.r.screen(e); this.r.app.guides?.move(e.pointerId, s.x, s.y); return; }
+    if (!this.pan && !e.buttons) { const s = this.r.screen(e); this.r.app.hoverAt?.(s.x, s.y); return; } // 링크 위면 손가락 커서
     if (!this.pan || this.pan.id !== e.pointerId) return;
     const s = this.r.screen(e);
+    if (Math.hypot(s.x - this.pan.x, s.y - this.pan.y) > 4) this.pan.moved = true;
     const c = this.pan.cam;
     this.r.viewer.setCamera(c.tx + s.x - this.pan.x, c.ty + s.y - this.pan.y, c.z);
   }
 
   onUp(e) {
     if (this.guide === e.pointerId) { this.r.app.guides?.release(e.pointerId); this.guide = null; }
-    if (this.pan && this.pan.id === e.pointerId) this.pan = null;
+    const p = this.pan;
+    if (p && p.id === e.pointerId) {
+      this.pan = null;
+      // 끌지 않은 왼쪽 클릭 = 탭 (링크 이동, 포스트잇 접기·체크 상자 등 손가락 탭과 같은 동작)
+      if (p.left && !p.moved && performance.now() - p.t0 < 500) this.r.app.tap?.(p.x, p.y);
+    }
   }
 
   onWheel(e) {
