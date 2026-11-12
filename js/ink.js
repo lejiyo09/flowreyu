@@ -383,6 +383,7 @@ export function setLayerState(layers, active) {
   layerState.top = layers[layers.length - 1]?.id || DEFAULT_LAYER;
   layerState.base = layers[0]?.id || DEFAULT_LAYER;
   layerState.multi = layers.length > 1;
+  layerState.ver = (layerState.ver || 0) + 1;
 }
 /** 객체의 레이어 id */
 export function layerOf(it) {
@@ -395,12 +396,16 @@ export function layerUsable(it) { const l = layerOf(it); return !layerState.hidd
 /** 맨 위 레이어의 객체인지 (새 필기를 덧그리기만 해도 되는지) */
 export function onTopLayer(it) { return !layerState.multi || layerOf(it) === layerState.top; }
 /** 레이어 순서대로 정렬 (같은 레이어 안에서는 원래 순서). 레이어가 하나면 그대로 */
+const sortedCache = new WeakMap(); // items 배열 → {ver, out} (같은 배열이면 매 프레임 다시 정렬하지 않음 → 공간 인덱스도 재사용)
 export function layerSorted(items) {
   if (!layerState.multi) return items;
+  const c = sortedCache.get(items);
+  if (c && c.ver === layerState.ver) return c.out;
   let prev = -1, sorted = true;
   for (const it of items) { const r = layerState.rank.get(layerOf(it)); if (r < prev) { sorted = false; break; } prev = r; }
-  if (sorted) return items;
-  return items.map((it, i) => [layerState.rank.get(layerOf(it)), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[2]);
+  const out = sorted ? items : items.map((it, i) => [layerState.rank.get(layerOf(it)), i, it]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((e) => e[2]);
+  sortedCache.set(items, { ver: layerState.ver, out });
+  return out;
 }
 /**
  * 지우개·올가미가 건드리면 안 되는 객체 id: 접힌 포스트잇 위 필기 + 숨김·잠금 레이어.

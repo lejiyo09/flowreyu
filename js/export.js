@@ -163,6 +163,21 @@ function drawTemplate(page, template) {
 
 export const PAGE_SIZES = { A4: [595.28, 841.89], Letter: [612, 792] };
 
+/**
+ * 무한 캔버스·무한 스크롤 문서 → PDF. 필기 좌표는 그대로 두고 페이지마다 "PDF 좌표 → 문서 좌표" 변환만 다르게 준다.
+ * @param sheets [{w, h, template, ox, oy, s}] PDF 페이지 크기(pt)·속지, 그 페이지 왼쪽 위가 문서의 (ox, oy), 배율 s (문서 1 = s pt)
+ * @param getItems (sheetIndex) => 그 페이지에 걸치는 객체들
+ */
+export async function exportSurfacePdf(sheets, getItems, onProgress, opts) {
+  const pdf = await PDFDocument.create();
+  for (const sh of sheets) drawTemplate(pdf.addPage([sh.w, sh.h]), sh.template || 'blank');
+  pdf.setProducer('FlexNote');
+  const bytes = await pdf.save();
+  // inv(문서 좌표 → PDF 좌표) = [s, 0, 0, -s, -ox·s, h + oy·s]. exportAnnotatedPdf 는 그 역행렬(pdf.js 뷰포트 변환과 같은 꼴)을 받는다
+  const vts = sheets.map((sh) => { const s = sh.s || 1; return invert([s, 0, 0, -s, -sh.ox * s, sh.h + sh.oy * s]); });
+  return exportAnnotatedPdf(bytes, vts, getItems, onProgress, opts);
+}
+
 /** 빈 노트 PDF 만들기 */
 export async function createBlankPdf(pageCount, template, size = 'A4') {
   const pdf = await PDFDocument.create();

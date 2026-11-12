@@ -1,5 +1,7 @@
 // IndexedDB 저장소
 // docs : 문서 메타데이터 {id, name, size, pageCount, created, updated, opened, view, thumb}
+//         kind: 없음(PDF 노트) | 'canvas'(무한 캔버스) | 'scroll'(무한 스크롤) — 뒤의 둘은 files 에 PDF 가 없고
+//         bg(배경 무늬)·size(스크롤 폭) 를 가진다. 필기는 pages 에 블록 레코드(page < 0)로 저장 (block-manager.js)
 // files: PDF 원본 {id, data: Blob}
 // pages: 페이지별 필기 {docId, page, items, rev, saved}  (키: [docId, page])
 // kv   : 기타 {k, v}  (예: lastDoc)
@@ -120,6 +122,26 @@ export async function savePages(docId, records, docPatch) {
   return tx2p(tx);
 }
 
+/** 무한 캔버스·스크롤 문서의 블록 저장: 바뀐 블록만 쓰고 줄어든 뒤쪽 블록은 지운다 (block-manager.js) */
+export async function saveBlocks(docId, put, del) {
+  const tx = await store(['pages', 'docs'], 'readwrite');
+  const ps = tx.objectStore('pages');
+  const t = Date.now();
+  for (const r of put) ps.put({ docId, page: r.page, items: r.items, rev: 0, saved: t, v: 1, block: true });
+  for (const page of del) ps.delete([docId, page]);
+  const ds = tx.objectStore('docs');
+  const cur = await req2p(ds.get(docId));
+  if (cur) ds.put({ ...cur, updated: t });
+  return tx2p(tx);
+}
+
+/** PDF 원본 없이 문서 만들기 (무한 캔버스·무한 스크롤) */
+export async function addSurfaceDoc(doc) {
+  const tx = await store('docs', 'readwrite');
+  tx.objectStore('docs').put(doc);
+  return tx2p(tx);
+}
+
 /**
  * 페이지 구조 변경(추가/삭제) 저장: PDF 원본 교체 + 필기 레코드 전체 재작성 + 메타 갱신을 한 트랜잭션으로.
  * 중간에 실패하면 아무것도 바뀌지 않는다 (PDF 와 필기 페이지 번호가 어긋나는 일 방지).
@@ -172,13 +194,13 @@ export async function duplicateDoc(id, newId, name, newBlobId) {
   const ds = tx.objectStore('docs'), fs = tx.objectStore('files'), ps = tx.objectStore('pages'), bs = tx.objectStore('blobs');
   const meta = await req2p(ds.get(id));
   const file = await req2p(fs.get(id));
-  if (!meta || !file) { tx.abort(); return null; }
+  if (!meta || (!file && !meta.kind)) { tx.abort(); return null; } // 무한 캔버스·스크롤 문서는 PDF 원본이 없음
   const pages = await req2p(ps.index('byDoc').getAll(IDBKeyRange.only(id)));
   const blobs = await req2p(bs.index('byDoc').getAll(IDBKeyRange.only(id)));
   const map = new Map(blobs.map((b) => [b.id, newBlobId(b)]));
   const t = Date.now();
   ds.put({ ...meta, id: newId, name, created: t, updated: t, opened: 0 });
-  fs.put({ ...file, id: newId });
+  if (file) fs.put({ ...file, id: newId });
   for (const b of blobs) bs.put({ ...b, id: map.get(b.id), docId: newId });
   for (const p of pages) {
     const items = p.items.map((it) => {

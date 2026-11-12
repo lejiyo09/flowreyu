@@ -9,7 +9,13 @@
 //  - #world (CSS transform) 안의 페이지마다: base 캔버스(페이지 전체, 해상도 상한) + detail 캔버스(보이는 영역만 고해상도)
 //    → 이동/확대 중에는 GPU 변환만 일어나므로 끊김이 적고, 멈추면 선명하게 다시 그린다.
 //  - 필기는 화면 크기의 캔버스(형광펜 레이어 / 펜 레이어)에 벡터로 매 프레임 다시 그린다 → 어떤 배율에서도 선명.
+//
+// 무한 캔버스·무한 스크롤 (surface 모드)
+//  - PDF 없이 페이지 0 하나만 둔다. 카메라 한계·보기 위치·배경은 모드 엔진(canvas-engine.js / scroll-engine.js)이 정하고
+//    필기 좌표·도구·입력은 PDF 노트와 똑같이 페이지 좌표를 쓴다.
+//  - 배경 무늬는 화면 크기의 배경 캔버스에 보이는 부분만 그리고, 필기는 공간 인덱스로 보이는 것만 그린다.
 import { Emitter, clamp, rectsIntersect } from './util.js';
+import { queryIndex } from './spatial-index.js';
 import { drawItem, isHighlighter, bbox, foldHidden, layerSorted, onTopLayer, transformItem, OBJECT_TYPES } from './ink.js';
 import * as pdfjsLib from '../vendor/pdfjs/pdf.min.mjs';
 
@@ -27,6 +33,9 @@ export class Viewer extends Emitter {
     this.el = viewportEl;
     this.insetTop = 0; // 화면 위쪽을 덮는 반투명 바 높이 (글래스 디자인: 페이지가 바 밑으로 지나가되 처음·맨 위는 바 아래에서 시작)
     this.world = worldEl;
+    this.bgCanvas = canvases.bg || null;
+    this.bgCtx = this.bgCanvas?.getContext('2d') || null;
+    this.surface = null; // 무한 캔버스·스크롤 엔진 (PDF 노트면 null)
     this.hlCanvas = canvases.hl;
     this.inkCanvas = canvases.ink;
     this.liveCanvas = canvases.live;
@@ -84,6 +93,33 @@ export class Viewer extends Emitter {
     this._sizeAll(pdf).catch((e) => console.warn('page size scan', e));
   }
 
+  /** 무한 캔버스·무한 스크롤 문서 열기 (PDF 없음) */
+  openSurface(engine, doc, view) {
+    this.close();
+    this.surface = engine;
+    this.doc = doc;
+    this.el.classList.add('surface-' + engine.kind);
+    const el = document.createElement('div');
+    el.className = 'page surface-page';
+    el.dataset.page = 0;
+    this.world.appendChild(el);
+    this.pages = [{ index: 0, w: 0, h: 0, x: 0, y: 0, el, base: null, baseScale: 0, detail: null, detailKey: '', vt: null, sized: true, proxy: null }];
+    this.layout();
+    this.resize(true);
+    this.restoreView(view);
+    this.requestInk();
+    this.emit('sized');
+  }
+
+  /** 문서가 바뀐 뒤 (스크롤 문서는 내용에 맞춰 길이가 늘거나 줄어듦) */
+  relayout() {
+    if (!this.surface?.update(this)) return;
+    this.layout();
+    this.clampCamera();
+    this.applyCamera();
+    this.emit('sized');
+  }
+
   async _sizeAll(pdf) {
     let changed = false;
     for (let i = 1; i < this.pages.length; i++) {
@@ -111,12 +147,18 @@ export class Viewer extends Emitter {
     this.pages = [];
     this.pdf = null;
     this.doc = null;
+    if (this.surface) {
+      this.el.classList.remove('surface-' + this.surface.kind);
+      this.surface = null;
+      if (this.bgCanvas) { this.bgCanvas.style.display = 'none'; this.bgCanvas.width = this.bgCanvas.height = 0; }
+    }
     this.selection = null;
     this.clearLive();
     this.requestInk();
   }
 
   layout() {
+    if (this.surface) { this.surface.layout(this); return; }
     let maxW = 0;
     for (const p of this.pages) maxW = Math.max(maxW, p.w);
     let y = 0;
@@ -140,13 +182,22 @@ export class Viewer extends Emitter {
     if (!force && w === this.vw && h === this.vh && dpr === this.dpr) return;
     const anchor = this.pages.length ? this.anchor() : null;
     this.vw = w; this.vh = h; this.dpr = dpr;
-    for (const c of [this.hlCanvas, this.inkCanvas, this.liveCanvas]) {
+    // 배경 캔버스는 무한 캔버스·스크롤에서만 (PDF 노트에서는 빈 화면 크기 층이라도 합성 비용·메모리만 듦)
+    if (this.bgCanvas) {
+      this.bgCanvas.style.display = this.surface ? '' : 'none';
+      if (!this.surface) this.bgCanvas.width = this.bgCanvas.height = 0;
+    }
+    for (const c of [this.surface ? this.bgCanvas : null, this.hlCanvas, this.inkCanvas, this.liveCanvas]) {
+      if (!c) continue;
       c.width = Math.round(w * dpr);
       c.height = Math.round(h * dpr);
       c.style.width = w + 'px';
       c.style.height = h + 'px';
     }
-    if (this.pages.length) {
+    if (this.surface) {
+      this.layout();
+      if (anchor && !force) this.surface.restore(this, anchor);
+    } else if (this.pages.length) {
       this.fitZ = (this.vw - MARGIN * 2) / this.contentW;
       if (anchor && !force) {
         this.cam.z = clamp(anchor.zr * this.pageFitZ(anchor.page), this.minZ(), this.maxZ());
@@ -164,10 +215,11 @@ export class Viewer extends Emitter {
 
   // ───────────────────────── 카메라 ─────────────────────────
 
-  minZ() { return Math.min(this.fitZ * 0.25, (this.vh - MARGIN * 2) / (this.pages[0]?.h || 800) * 0.5); }
-  maxZ() { return Math.max(this.fitZ * 10, 8); }
+  minZ() { if (this.surface) return this.surface.minZ(this); return Math.min(this.fitZ * 0.25, (this.vh - MARGIN * 2) / (this.pages[0]?.h || 800) * 0.5); }
+  maxZ() { if (this.surface) return this.surface.maxZ(this); return Math.max(this.fitZ * 10, 8); }
 
   clampCamera(c = this.cam) {
+    if (this.surface) return this.surface.clamp(this, c);
     c.z = clamp(c.z, this.minZ(), this.maxZ());
     const cw = this.contentW * c.z, ch = this.contentH * c.z;
     if (cw + MARGIN * 2 <= this.vw) c.tx = (this.vw - cw) / 2;
@@ -203,6 +255,7 @@ export class Viewer extends Emitter {
 
   /** 페이지 폭에 맞추는 배율 (페이지마다 폭이 다를 수 있음) */
   pageFitZ(i = this.currentPage()) {
+    if (this.surface) return this.surface.fitZ(this);
     const p = this.pages[i];
     return p ? (this.vw - MARGIN * 2) / p.w : this.fitZ;
   }
@@ -211,6 +264,7 @@ export class Viewer extends Emitter {
   relZoom() { return this.cam.z / this.pageFitZ(); }
 
   fitWidth() {
+    if (this.surface) { this.surface.fit(this, 'width'); return; }
     const a = this.anchor();
     this.cam.z = clamp(this.pageFitZ(a?.page), this.minZ(), this.maxZ());
     if (a) a.fx = 0.5; // 폭 맞춤은 페이지를 가로 중앙에
@@ -218,6 +272,7 @@ export class Viewer extends Emitter {
   }
 
   fitPage() {
+    if (this.surface) { this.surface.fit(this, 'page'); return; }
     const p = this.pages[this.currentPage()];
     if (!p) return;
     const vh = this.vh - this.insetTop;
@@ -286,6 +341,7 @@ export class Viewer extends Emitter {
 
   /** i 페이지로 이동. y 를 주면 페이지 안의 그 높이가 화면 위쪽에 오도록 */
   goToPage(i, y = 0) {
+    if (this.surface) { if (this.surface.kind === 'scroll') this.setCamera(this.cam.tx, MARGIN + this.insetTop - y * this.cam.z, this.cam.z); return; }
     i = clamp(i, 0, this.pages.length - 1);
     const p = this.pages[i];
     if (!p) return;
@@ -332,6 +388,7 @@ export class Viewer extends Emitter {
 
   /** 현재 보기 위치를 페이지 기준 상대 값으로 (리사이즈·복원용) */
   anchor() {
+    if (this.surface) return this.surface.anchor(this);
     const p = this.pages[this.currentPage()] || this.pages[0];
     if (!p) return null;
     const w = this.toWorld(this.vw / 2, 0);
@@ -348,6 +405,7 @@ export class Viewer extends Emitter {
   }
 
   restoreView(view) {
+    if (this.surface) { this.surface.restore(this, view); return; }
     if (view && Number.isFinite(view.zr) && this.pages[view.page]) {
       this.cam.z = clamp(view.zr * this.pageFitZ(view.page), this.minZ(), this.maxZ());
       this.restoreAnchor(view);
@@ -538,6 +596,7 @@ export class Viewer extends Emitter {
     const t = `translate(${c.tx - d.tx * k}px, ${c.ty - d.ty * k}px) scale(${k})`;
     this.hlCanvas.style.transform = t;
     this.inkCanvas.style.transform = t;
+    if (this.surface && this.bgCanvas) this.bgCanvas.style.transform = t;
     this.inkOffset = true;
     clearTimeout(this._inkSettle);
     this._inkSettle = setTimeout(() => this.requestInk(), 90);
@@ -557,7 +616,7 @@ export class Viewer extends Emitter {
     this.inkCost = this.inkCost ? this.inkCost * 0.7 + dt * 0.3 : dt;
     this._lastFullInk = performance.now();
     this.drawnCam = { ...this.cam };
-    if (this.inkOffset) { this.hlCanvas.style.transform = ''; this.inkCanvas.style.transform = ''; this.inkOffset = false; }
+    if (this.inkOffset) { this.hlCanvas.style.transform = ''; this.inkCanvas.style.transform = ''; if (this.bgCanvas) this.bgCanvas.style.transform = ''; this.inkOffset = false; }
   }
 
   _drawInk() {
@@ -566,6 +625,12 @@ export class Viewer extends Emitter {
     ink.setTransform(1, 0, 0, 1, 0, 0);
     hl.clearRect(0, 0, this.hlCanvas.width, this.hlCanvas.height);
     ink.clearRect(0, 0, this.inkCanvas.width, this.inkCanvas.height);
+    const bg = this.surface && this.bgCtx;
+    if (bg) {
+      bg.setTransform(1, 0, 0, 1, 0, 0);
+      bg.clearRect(0, 0, this.bgCanvas.width, this.bgCanvas.height);
+      if (this.surface && this.doc) this.surface.drawBackground(bg, this);
+    }
     if (!this.doc) return;
     const sel = this.selection;
     for (const p of this.visiblePages(0.05)) {
@@ -584,7 +649,11 @@ export class Viewer extends Emitter {
         ctx.clip();
       }
       const folded = foldHidden(items); // 접힌 포스트잇 위의 필기는 숨김
-      for (const it of items) {
+      // 객체가 많으면 공간 인덱스로 보이는 영역의 객체만 (순서는 그대로). 끌어 옮기는 중에는 화면 밖에서 들어오는 것도 있어 전부
+      const pick = items.length > 300 && !(sel?.m && sel.page === p.index) ? queryIndex(items, view) : null;
+      const n = pick ? pick.length : items.length;
+      for (let k = 0; k < n; k++) {
+        const it = items[pick ? pick[k] : k];
         if (this.hidden && this.hidden.has(it.id)) continue;
         if (folded && folded.has(it.id)) continue;
         // 녹음 재생 중: 재생 위치보다 나중에 쓴 필기는 흐리게

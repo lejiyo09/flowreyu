@@ -102,6 +102,7 @@
         <button class="icon-btn sm" id="btnZoomIn" title="확대"><svg><use href="#i-plus"/></svg></button>
       </div>
       <button class="page-ind" id="pageInd">1 / 1</button>
+      <select class="surf-bg" id="surfBg" title="배경 무늬" hidden><option value="blank">무지</option><option value="lined">줄</option><option value="grid">모눈</option><option value="dot">점</option></select>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
       <button class="icon-btn" id="btnClock" title="스톱워치·타이머"><svg><use href="#i-clock"/></svg></button>
       <button class="icon-btn" id="btnLayers" title="레이어"><svg><use href="#i-layers"/></svg></button>
@@ -127,6 +128,7 @@
 
     <main id="viewport" class="viewport">
       <div id="world" class="world"></div>
+      <canvas id="cvBg" class="layer"></canvas>
       <canvas id="cvHl" class="layer hl"></canvas>
       <canvas id="cvInk" class="layer"></canvas>
       <canvas id="cvLive" class="layer"></canvas>
@@ -406,11 +408,14 @@
     <header class="dlg-head"><h2>새 노트</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
     <div class="dlg-body">
       <div class="row"><span>이름</span><input type="text" id="nnName" value="새 노트" maxlength="80"></div>
-      <div class="row"><span>속지</span>
+      <div class="row"><span>종류</span>
+        <select id="nnKind"><option value="pdf">페이지 노트</option><option value="scroll">무한 스크롤 (아래로 계속)</option><option value="canvas">무한 캔버스 (사방으로)</option></select>
+      </div>
+      <div class="row"><span>속지·배경</span>
         <select id="nnTemplate"><option value="blank">무지</option><option value="lined">줄 노트</option><option value="grid">모눈 (5mm)</option><option value="dot">점 격자</option></select>
       </div>
-      <div class="row"><span>크기</span><select id="nnSize"><option value="A4">A4</option><option value="Letter">Letter</option></select></div>
-      <div class="row"><span>페이지 수</span><input type="number" id="nnPages" value="20" min="1" max="500"></div>
+      <div class="row" id="nnSizeRow"><span>크기</span><select id="nnSize"><option value="A4">A4</option><option value="Letter">Letter</option></select></div>
+      <div class="row" id="nnPagesRow"><span>페이지 수</span><input type="number" id="nnPages" value="20" min="1" max="500"></div>
     </div>
     <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok" id="nnOk">만들기</button></footer>
   </form>

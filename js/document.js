@@ -6,6 +6,7 @@
 import { Emitter, debounce } from './util.js';
 import { sanitizeItem } from './ink.js';
 import * as store from './store.js';
+import { BlockManager } from './block-manager.js';
 
 const HISTORY_LIMIT = 300;
 const SAVE_DELAY = 500;
@@ -27,6 +28,8 @@ export class NoteDocument extends Emitter {
     this.retryMs = 0;
     this.closed = false;
     this.activeLayer = null; // 새 객체를 넣을 레이어 id (기본 레이어면 null → ly 생략)
+    // 무한 캔버스·무한 스크롤: 객체는 페이지 0 하나에 두고, 저장은 블록 단위(바뀐 블록만)
+    this.blocks = meta.kind === 'canvas' || meta.kind === 'scroll' ? new BlockManager() : null;
     this._saveSoon = debounce(() => this.save(), SAVE_DELAY);
   }
 
@@ -34,6 +37,13 @@ export class NoteDocument extends Emitter {
   async load() {
     const recs = await store.loadPages(this.id);
     let skipped = 0;
+    if (this.blocks) {
+      let total = 0;
+      for (const r of recs) if (Array.isArray(r.items)) total += r.items.length;
+      const items = this.blocks.load(recs, sanitizeItem);
+      this.pages.set(0, items);
+      return { skipped: total - items.length };
+    }
     for (const r of recs) {
       if (!Number.isInteger(r.page) || !Array.isArray(r.items)) { skipped++; continue; }
       const items = [];
@@ -144,12 +154,15 @@ export class NoteDocument extends Emitter {
     while (this.saving) await this.saving.catch(() => {});
     if (!this.dirty.size) { if (this.saveState !== 'error') this._setState('saved'); return this.saveState !== 'error'; }
     const pages = [...this.dirty];
+    let blockDiff = null;
+    if (this.blocks) blockDiff = this.blocks.diff(this.items(0));
     const snapshot = pages.map((p) => ({ page: p, items: this.items(p), rev: this.rev.get(p) || 0 }));
     this.dirty.clear();
     this._setState('saving');
-    this.saving = store.savePages(this.id, snapshot);
+    this.saving = blockDiff ? store.saveBlocks(this.id, blockDiff.put, blockDiff.del) : store.savePages(this.id, snapshot);
     try {
       await this.saving;
+      if (blockDiff) this.blocks.commit(blockDiff.next);
       this.retryMs = 0;
       if (this.dirty.size) { this._saveSoon(); this._setState('pending'); }
       else this._setState('saved');

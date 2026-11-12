@@ -12,7 +12,9 @@ import { Clock, fmtClock, ringSound } from './timer.js';
 import { mightHaveGalleryInk, extractGalleryInk } from './gallery.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, transcribeRequest, parseTranscript, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
-import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp } from './util.js';
+import { CanvasEngine } from './canvas-engine.js';
+import { ScrollEngine, contentBottom } from './scroll-engine.js';
+import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsIntersect } from './util.js';
 import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
@@ -63,7 +65,7 @@ applyTheme();
 
 // ───────────────────────────── 뷰어 · 입력 · 도구 ─────────────────────────────
 
-const viewer = new Viewer($('#viewport'), $('#world'), { hl: $('#cvHl'), ink: $('#cvInk'), live: $('#cvLive') });
+const viewer = new Viewer($('#viewport'), $('#world'), { bg: $('#cvBg'), hl: $('#cvHl'), ink: $('#cvInk'), live: $('#cvLive') });
 
 const app = {
   doc: () => state.doc,
@@ -244,7 +246,7 @@ async function renderLibrary() {
         <button data-a="rename">✎ 이름</button><button data-a="move">↪ 이동</button><button data-a="dup">⧉ 사본</button><button data-a="del" class="danger">삭제</button>
       </div>
       <div class="name">${escapeHtml(d.name)}</div>
-      <div class="meta">${d.pageCount || '?'}쪽 · ${formatDate(d.updated || d.created)}</div>`;
+      <div class="meta">${KIND_LABEL[d.kind] || `${d.pageCount || '?'}쪽`} · ${formatDate(d.updated || d.created)}</div>`;
     const longPressed = bindCardMenu(card, (at) => cardMenu(at, d));
     card.addEventListener('click', (e) => {
       if (longPressed()) return; // 길게 누른 뒤 손을 뗀 것은 열기 아님
@@ -539,10 +541,34 @@ document.addEventListener('drop', (e) => {
   if (f) importFile(f);
 });
 
-$('#btnNewNote').addEventListener('click', () => $('#newNoteDlg').showModal());
+const KIND_LABEL = { canvas: '무한 캔버스', scroll: '무한 스크롤' };
+/** 새 노트 종류에 따라 필요한 칸만: 페이지 수는 PDF 노트만, 크기(폭)는 PDF·스크롤만 */
+function syncNewNoteForm() {
+  const k = $('#nnKind').value;
+  $('#nnPagesRow').hidden = k !== 'pdf';
+  $('#nnSizeRow').hidden = k === 'canvas';
+}
+$('#nnKind').addEventListener('change', syncNewNoteForm);
+$('#btnNewNote').addEventListener('click', () => { syncNewNoteForm(); $('#newNoteDlg').showModal(); });
+
+/** 무한 캔버스·무한 스크롤 문서 만들기 (PDF 원본 없음) */
+async function createSurfaceDoc(kind, name, bg, size) {
+  const t = Date.now();
+  const meta = { id: uid('d'), name, kind, bg, size, pageCount: 0, created: t, updated: t, opened: t, thumb: null, view: null, folder: curFolder };
+  await store.addSurfaceDoc(meta);
+  store.requestPersist();
+  return meta.id;
+}
+
 $('#newNoteDlg').addEventListener('close', async () => {
   if ($('#newNoteDlg').returnValue !== 'ok') return;
   const name = $('#nnName').value.trim() || '새 노트';
+  const kind = $('#nnKind').value;
+  if (kind !== 'pdf') {
+    try { await openDoc(await createSurfaceDoc(kind, name, $('#nnTemplate').value, $('#nnSize').value)); }
+    catch (e) { console.error(e); toast('노트를 만들 수 없습니다: ' + store.describeError(e), { error: true }); }
+    return;
+  }
   const n = clamp(parseInt($('#nnPages').value, 10) || 20, 1, 500);
   busy('노트 만드는 중…');
   try {
@@ -573,6 +599,7 @@ async function closeDoc() {
   const doc = state.doc;
   if (doc) {
     saveView.flush();
+    if (viewer.surface && (doc.undoStack.length || !doc.meta.thumb)) await saveSurfaceThumb(doc).catch(() => {});
     const ok = await doc.close().catch(() => false);
     if (!ok && doc.saveState === 'error') toast('일부 필기를 저장하지 못했습니다', { error: true });
   }
@@ -584,12 +611,84 @@ async function closeDoc() {
   state.doc = null; state.pdf = null; state.blob = null;
 }
 
+/** 무한 캔버스·무한 스크롤 문서 열기 */
+async function openSurfaceDoc(meta) {
+  const doc = new NoteDocument(meta);
+  const { skipped } = await doc.load();
+  state.doc = doc; state.pdf = null; state.blob = null;
+  wireDoc(doc);
+  initLayers(doc);
+  $('#docTitle').textContent = meta.name;
+  setSurfaceUi(meta);
+  showScreen('editor');
+  const engine = meta.kind === 'canvas' ? new CanvasEngine({ bg: meta.bg }) : new ScrollEngine({ size: meta.size, bg: meta.bg });
+  viewer.openSurface(engine, doc, meta.view);
+  thumbs.clear();
+  placeAddPageButton();
+  updateHistoryButtons();
+  renderSaveState();
+  updatePageIndicator();
+  updateZoomLabel();
+  store.kvSet('lastDoc', meta.id).catch(() => {});
+  store.patchDoc(meta.id, { opened: Date.now() }).catch(() => {});
+  if (skipped) toast(`손상된 필기 데이터 ${skipped}개를 건너뛰었습니다`, { error: true, ms: 5000 });
+}
+
+/** 문서 종류에 따라 위쪽 바: 페이지 패널·페이지 표시는 PDF 노트용, 배경 선택은 무한 캔버스·스크롤용 */
+function setSurfaceUi(meta) {
+  const surf = !!KIND_LABEL[meta?.kind];
+  $('#btnThumbs').hidden = surf;
+  if (surf && thumbs.open) { thumbs.show(false); $('#btnThumbs').classList.remove('on'); }
+  $('#pageInd').hidden = meta?.kind === 'canvas';
+  $('#surfBg').hidden = !surf;
+  if (surf) $('#surfBg').value = meta.bg || 'blank';
+}
+
+$('#surfBg').addEventListener('change', (e) => {
+  const d = state.doc, eng = viewer.surface;
+  if (!d || !eng) return;
+  eng.bg = d.meta.bg = e.target.value;
+  eng._tpl = null;
+  store.patchDoc(d.id, { bg: d.meta.bg }).catch(() => {});
+  viewer.requestInk();
+});
+
+/** 무한 캔버스·스크롤 문서의 라이브러리 표지: 스크롤은 첫 시트, 캔버스는 내용 전체 */
+async function saveSurfaceThumb(doc) {
+  const eng = viewer.surface;
+  const items = layerSorted(doc.items(0));
+  const folded = foldHidden(items);
+  const vis = folded ? items.filter((it) => !folded.has(it.id)) : items;
+  let box;
+  if (eng.kind === 'scroll') box = { x: 0, y: 0, w: eng.W, h: eng.sheetH };
+  else {
+    if (!vis.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const it of vis) { const b = bbox(it); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+    const w = Math.max(x1 - x0, (y1 - y0) * 0.75) + 40, h = w / 0.75; // 표지 비율 3:4
+    box = { x: (x0 + x1) / 2 - w / 2, y: (y0 + y1) / 2 - h / 2, w, h };
+  }
+  const c = document.createElement('canvas');
+  c.width = 300; c.height = 400;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  const s = Math.min(c.width / box.w, c.height / box.h);
+  ctx.setTransform(s, 0, 0, s, -box.x * s, -box.y * s);
+  for (const it of vis) if (rectsIntersect(bbox(it), box)) drawItem(ctx, it, { print: true });
+  const thumb = c.toDataURL('image/jpeg', 0.75);
+  doc.meta.thumb = thumb;
+  await store.patchDoc(doc.id, { thumb });
+}
+
 async function openDoc(id) {
   busy('문서 여는 중…');
   try {
     await closeDoc();
     const meta = await store.getDoc(id);
     if (!meta) throw new Error('문서를 찾을 수 없습니다');
+    if (KIND_LABEL[meta.kind]) { await openSurfaceDoc(meta); busy(null); return; }
+    setSurfaceUi(meta);
     let blob = await store.getFile(id);
     if (!blob) throw new Error('PDF 원본이 저장소에 없습니다 (브라우저가 데이터를 삭제했을 수 있습니다)');
     if (!meta.galleryChecked) blob = (await importGalleryInk(meta, blob)) || blob; // 처음 열 때 한 번: 크롬북 갤러리 필기
@@ -625,6 +724,7 @@ async function openDoc(id) {
 
 function wireDoc(doc) {
   doc.on('change', ({ page, appended }) => {
+    viewer.relayout(); // 무한 스크롤: 내용에 맞춰 길이 조절
     // 새 획 하나만 추가된 경우는 그 획만 덧그리고, 그 밖의 변경은 전체를 다시 그린다
     if (!(appended && viewer.appendItem(page, appended))) viewer.requestInk();
     thumbs.markInk(page);
@@ -691,6 +791,11 @@ function showZoomBadge() {
 }
 function updatePageIndicator() {
   if (!viewer.pages.length) return;
+  if (viewer.surface) {
+    // 무한 스크롤: 인쇄 페이지(시트) 기준
+    if (viewer.surface.kind === 'scroll') $('#pageInd').textContent = `${viewer.surface.currentSheet(viewer) + 1} / ${Math.max(viewer.surface.sheetCount(viewer), viewer.surface.currentSheet(viewer) + 1)}`;
+    return;
+  }
   const cur = viewer.currentPage();
   $('#pageInd').textContent = `${cur + 1} / ${viewer.pages.length}`;
   thumbs.setCurrent(cur, false);
@@ -707,6 +812,12 @@ $('#btnThumbs').addEventListener('click', () => {
   requestAnimationFrame(() => viewer.resize());
 });
 $('#pageInd').addEventListener('click', () => {
+  if (viewer.surface?.kind === 'scroll') {
+    const eng = viewer.surface, n = Math.round(viewer.pages[0].h / eng.sheetH); // 종이 전체 (빈 시트 포함)
+    const v = parseInt(prompt(`이동할 페이지 (1~${n})`, String(eng.currentSheet(viewer) + 1)) || '', 10);
+    if (v >= 1) eng.goToSheet(viewer, Math.min(v, n) - 1);
+    return;
+  }
   if (!thumbs.open) { thumbs.show(true); $('#btnThumbs').classList.add('on'); requestAnimationFrame(() => viewer.resize()); }
   $('#gotoPage').focus();
 });
@@ -720,6 +831,27 @@ $('#btnSettings').addEventListener('click', () => openSettings());
 $('#btnLibSettings').addEventListener('click', () => openSettings());
 $('#btnDebug').addEventListener('click', () => { dbg.enable(!dbg.on); });
 
+/** 무한 스크롤 → 시트(인쇄 페이지)마다 한 장, 무한 캔버스 → 내용 전체를 담은 한 장 */
+async function surfacePdfBytes(doc) {
+  const eng = viewer.surface;
+  const items = doc.items(0);
+  const { exportSurfacePdf } = await import('./export.js');
+  const opts = { getBlob: (id) => store.getBlob(id), gallery: !!settings.get('exportGallery') };
+  const progress = (i, n) => busy(`PDF 만드는 중… ${i}/${n}`);
+  if (eng.kind === 'scroll') {
+    const n = eng.sheetCount(viewer);
+    const sheets = Array.from({ length: n }, (_, i) => ({ w: eng.W, h: eng.sheetH, template: eng.bg, ox: 0, oy: i * eng.sheetH }));
+    const band = (i) => ({ x: -1e6, y: i * eng.sheetH, w: 2e6, h: eng.sheetH });
+    return exportSurfacePdf(sheets, (i) => items.filter((it) => rectsIntersect(bbox(it), band(i))), progress, opts);
+  }
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const it of items) { const b = bbox(it); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+  if (!items.length) { x0 = y0 = 0; x1 = 595.28; y1 = 841.89; }
+  const pad = 36, w = x1 - x0 + pad * 2, h = y1 - y0 + pad * 2;
+  const s = Math.min(1, 14400 / w, 14400 / h); // PDF 페이지 최대 크기(200인치)를 넘으면 줄여서
+  return exportSurfacePdf([{ w: w * s, h: h * s, ox: x0 - pad, oy: y0 - pad, s }], () => items, progress, opts);
+}
+
 async function exportPdf() {
   const doc = state.doc;
   if (!doc) return;
@@ -727,6 +859,11 @@ async function exportPdf() {
   await doc.flush();
   busy('PDF 만드는 중…');
   try {
+    if (viewer.surface) {
+      downloadPdf(await surfacePdfBytes(doc), doc.meta.name);
+      toast('필기를 PDF로 내보냈습니다');
+      return;
+    }
     // 모든 페이지 변환 행렬이 필요하므로 아직 안 읽은 페이지는 읽는다
     for (const p of viewer.pages) {
       if (!p.vt && doc.items(p.index).length) p.vt = (await state.pdf.getPage(p.index + 1)).getViewport({ scale: 1 }).transform;
@@ -734,19 +871,23 @@ async function exportPdf() {
     const { exportAnnotatedPdf } = await import('./export.js');
     const bytes = await exportAnnotatedPdf(await state.blob.arrayBuffer(), viewer.pages.map((p) => p.vt), (i) => doc.items(i),
       (i, n) => busy(`PDF 만드는 중… ${i}/${n}`), { getBlob: (id) => store.getBlob(id), gallery: !!settings.get('exportGallery') });
-    const blob = new Blob([bytes], { type: 'application/pdf' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${doc.meta.name}_필기.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    downloadPdf(bytes, doc.meta.name);
     toast(settings.get('exportGallery') ? '필기가 포함된 PDF를 내보냈습니다 (크롬북 갤러리 호환)' : '필기가 포함된 PDF를 내보냈습니다');
   } catch (e) {
     console.error(e);
     toast('내보내기 실패: ' + (e?.message || e), { error: true, ms: 6000 });
   } finally { busy(null); }
+}
+
+function downloadPdf(bytes, name) {
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${name}_필기.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
 }
 
 // ───────────────────────────── 페이지 추가 / 삭제 ─────────────────────────────
@@ -836,7 +977,7 @@ addEndBtn.innerHTML = '<svg><use href="#i-plus"/></svg><span>페이지 추가</s
 addEndBtn.addEventListener('click', () => addPages('end', state.doc?.meta.template || 'blank', 1));
 function placeAddPageButton() {
   const last = viewer.pages[viewer.pages.length - 1];
-  if (!last) { addEndBtn.remove(); return; }
+  if (!last || viewer.surface) { addEndBtn.remove(); return; } // 무한 캔버스·스크롤은 페이지 추가 없음
   if (addEndBtn.parentNode !== $('#world')) $('#world').appendChild(addEndBtn);
   // 화면에서 약 44px 높이가 되도록 월드 단위로 크기를 잡되, 버튼 글자는 transform 으로 보정
   Object.assign(addEndBtn.style, { left: last.x + 'px', top: last.y + last.h + 16 + 'px', width: last.w + 'px', height: '40px' });
@@ -1523,6 +1664,7 @@ function updateAiTarget() {
 
 /** 현재 페이지를 필기까지 그린 JPEG (base64). 긴 변 1568px 이하 */
 async function pageImageBase64(i) {
+  if (viewer.surface) return surfaceImageBase64();
   const p = viewer.pages[i];
   const scale = Math.min(1568 / Math.max(p.w, p.h), 2.5);
   const page = await viewer.pdf.getPage(i + 1);
@@ -1541,6 +1683,28 @@ async function pageImageBase64(i) {
   ctx.globalCompositeOperation = 'source-over';
   for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it);
   return c.toDataURL('image/jpeg', 0.88).split(',')[1]; // PNG 는 사진 많은 PDF 에서 이미지 한도(5MB)를 넘을 수 있음
+}
+
+/** 무한 캔버스·스크롤: 지금 화면에 보이는 영역(스크롤은 지금 시트)을 필기까지 그린 JPEG */
+function surfaceImageBase64() {
+  const eng = viewer.surface;
+  const w0 = viewer.toWorld(0, viewer.insetTop), w1 = viewer.toWorld(viewer.vw, viewer.vh);
+  const box = eng.kind === 'scroll' ? { x: 0, y: eng.currentSheet(viewer) * eng.sheetH, w: eng.W, h: eng.sheetH } : { x: w0.x, y: w0.y, w: w1.x - w0.x, h: w1.y - w0.y };
+  const s = Math.min(1568 / Math.max(box.w, box.h), 2.5);
+  const c = document.createElement('canvas');
+  c.width = Math.ceil(box.w * s); c.height = Math.ceil(box.h * s);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.setTransform(s, 0, 0, s, -box.x * s, -box.y * s);
+  const items = layerSorted(state.doc.items(0));
+  const folded = foldHidden(items);
+  const vis = items.filter((it) => !folded?.has(it.id) && rectsIntersect(bbox(it), box));
+  ctx.globalCompositeOperation = 'multiply';
+  for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it);
+  ctx.globalCompositeOperation = 'source-over';
+  for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it);
+  return c.toDataURL('image/jpeg', 0.88).split(',')[1];
 }
 
 function aiShow(text, { error = false, explain = '' } = {}) {
