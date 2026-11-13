@@ -2969,6 +2969,9 @@ function styleSelectedText(a) {
 // ───────────────────────────── 텍스트 편집 ─────────────────────────────
 
 const te = $('#textEditor');
+for (const el of [$('#viewport'), $('#overlay'), $('#world')]) {
+  el.addEventListener('scroll', () => { if (el.scrollLeft || el.scrollTop) { el.scrollLeft = 0; el.scrollTop = 0; } });
+}
 /**
  * 글 편집 상자. kind: text(글상자) | note(포스트잇) | check(체크리스트, 한 줄 = 한 항목) | cell(표의 한 칸)
  * opts: { cell:{r,c} 표 칸, isNew: 방금 만든 개체(비우면 삭제) }
@@ -3000,7 +3003,18 @@ function startTextEdit(page, item, x, y, opts = {}) {
   setTimeout(focusEnd, 0);
 }
 
+/** 글 입력칸 위치·크기. 보이는 화면 밖으로는 키우지 않는다 (넘치는 글은 입력칸 안에서 스크롤) */
 function positionTextEditor() {
+  placeTextEditor();
+  if (!state.editing) return;
+  // 크게 확대했거나 글이 길면 입력칸이 화면 전체를 덮어 다른 곳을 눌러도(펜·손가락) 입력칸이 받아 버린다 → 보이는 영역까지만
+  const left = parseFloat(te.style.left) || 0, top = parseFloat(te.style.top) || 0;
+  const maxW = Math.max(60, viewer.vw - Math.max(left, 0) - 8), maxH = Math.max(40, viewer.vh - Math.max(top, 0) - 8);
+  if (parseFloat(te.style.width) > maxW) te.style.width = maxW + 'px';
+  if (parseFloat(te.style.height) > maxH) te.style.height = maxH + 'px';
+}
+
+function placeTextEditor() {
   const ed = state.editing;
   if (!ed) return;
   const z = viewer.cam.z;
