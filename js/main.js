@@ -13,6 +13,7 @@ import { mightHaveGalleryInk, extractGalleryInk } from './gallery.js';
 import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyFromHash, minutesRequest, grammarRequest, translateRequest, transcribeRequest, parseTranscript, unpackTexts, splitExplain, extractTodos, TRANSLATE_LANGS } from './ai.js';
 import { InputDebugger } from './debug.js';
 import { CanvasEngine } from './canvas-engine.js';
+import { prepQuery, buildPdfIndex, findInIndex, findInItems } from './search.js';
 import { groupItems, ungroupItems, groupInfo, reorder, alignItems, selectionUnits, nudgeItems, cloneItems } from './arrange.js';
 import { ScrollEngine, contentBottom } from './scroll-engine.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsIntersect } from './util.js';
@@ -613,6 +614,7 @@ async function closeDoc() {
   if (recorder.recording) await stopRecording(); // 녹음 중이면 먼저 저장
   commitTextEdit();
   if (state.doc && !(await ensureSaved(state.doc))) return false;
+  closeSearch();
   stopPlayback(true);
   tools.cancel();
   tools.clearSelection();
@@ -748,6 +750,7 @@ async function openDoc(id) {
 function wireDoc(doc) {
   doc.on('change', ({ page, appended }) => {
     viewer.relayout(); // 무한 스크롤: 내용에 맞춰 길이 조절
+    if (!$('#searchBar').hidden) searchSoon(); // 직접 쓴 글이 바뀌면 결과도
     // 새 획 하나만 추가된 경우는 그 획만 덧그리고, 그 밖의 변경은 전체를 다시 그린다
     if (!(appended && viewer.appendItem(page, appended))) viewer.requestInk();
     thumbs.markInk(page);
@@ -2137,6 +2140,121 @@ clock.schedule();
 clock.check(true); // 앱이 꺼져 있던 동안 끝났는지
 renderClock();
 
+// ───────────────────────────── 글자 찾기 (Ctrl+F) ─────────────────────────────
+
+const pdfIndex = { pdf: null, pages: new Map() }; // 페이지 글자 색인 캐시 (PDF 가 바뀌면 비움)
+let searchJob = 0;
+let searchHits = []; // [{page, rects}] 문서 순서
+let searchCur = -1;
+
+function openSearch() {
+  if (!state.doc) return;
+  const bar = $('#searchBar'), inp = $('#searchInput');
+  commitTextEdit();
+  bar.hidden = false;
+  $('#btnSearch').classList.add('on');
+  inp.focus();
+  inp.select();
+  if (inp.value) runSearch();
+}
+function closeSearch() {
+  searchJob++;
+  $('#searchBar').hidden = true;
+  $('#btnSearch').classList.remove('on');
+  searchHits = []; searchCur = -1;
+  if (viewer.search) { viewer.search = null; viewer.requestInk(); }
+  $('#searchInput').blur();
+}
+const searchSoon = debounce(() => runSearch({ keepPlace: true }), 250);
+
+async function pageTextIndex(i) {
+  if (pdfIndex.pdf !== state.pdf) { pdfIndex.pdf = state.pdf; pdfIndex.pages.clear(); }
+  let idx = pdfIndex.pages.get(i);
+  if (!idx) {
+    const pg = await state.pdf.getPage(i + 1);
+    const tc = await pg.getTextContent();
+    idx = buildPdfIndex(tc.items, pg.getViewport({ scale: 1 }).transform, tc.styles);
+    pdfIndex.pages.set(i, idx);
+  }
+  return idx;
+}
+
+/** 모든 페이지를 차례로 찾는다 (긴 PDF 도 화면이 멈추지 않게 나눠서, 찾는 중에도 개수가 늘어남) */
+async function runSearch({ keepPlace = false } = {}) {
+  const job = ++searchJob, d = state.doc;
+  const q = prepQuery($('#searchInput').value);
+  const prevCur = searchHits[searchCur];
+  searchHits = []; searchCur = -1;
+  const count = $('#searchCount');
+  count.classList.remove('none');
+  if (!q || !d) { count.textContent = ''; viewer.search = null; viewer.requestInk(); return; }
+  const n = viewer.pages.length, start = viewer.currentPage();
+  let pdfChars = 0;
+  for (let i = 0; i < n; i++) {
+    let hits = [];
+    if (state.pdf) {
+      try { const idx = await pageTextIndex(i); pdfChars += idx.text.length; hits = findInIndex(idx, q); } catch (e) { console.warn('[search] page', i, e); }
+    }
+    if (job !== searchJob) return; // 그사이 검색어가 바뀜
+    hits.push(...findInItems(d.items(i), q, bbox));
+    hits.sort((a, b) => a.rects[0].y - b.rects[0].y || a.rects[0].x - b.rects[0].x); // 위에서 아래, 왼쪽에서 오른쪽
+    for (const hm of hits) searchHits.push({ page: i, rects: hm.rects });
+    // 처음 결과: 지금 보는 페이지(또는 그 뒤)의 첫 결과로 바로 이동
+    if (searchCur < 0 && !keepPlace && searchHits.length && (i >= start || i === n - 1)) {
+      searchCur = Math.max(0, searchHits.findIndex((hm) => hm.page >= start));
+      showSearchHit(true);
+    }
+    if (i % 8 === 7 || i === n - 1) { updateSearchView(n, i + 1); await new Promise((r) => setTimeout(r, 0)); if (job !== searchJob) return; }
+  }
+  if (keepPlace && searchHits.length) {
+    // 글이 바뀌어 다시 찾은 경우: 보던 결과 근처 유지 (화면은 움직이지 않음)
+    const k = prevCur ? searchHits.findIndex((hm) => hm.page > prevCur.page || (hm.page === prevCur.page && hm.rects[0].y >= prevCur.rects[0].y - 1)) : 0;
+    searchCur = k < 0 ? searchHits.length - 1 : k;
+  }
+  if (searchCur < 0 && searchHits.length) { searchCur = 0; showSearchHit(true); }
+  updateSearchView(n, n);
+  if (!searchHits.length) {
+    count.classList.add('none');
+    count.textContent = state.pdf && !pdfChars ? '없음 · 이 PDF는 글자 정보가 없어요(스캔본)' : '없음';
+  }
+}
+
+function updateSearchView(n, done) {
+  const by = new Map();
+  searchHits.forEach((hm) => { if (!by.has(hm.page)) by.set(hm.page, []); by.get(hm.page).push(hm); });
+  const cur = searchHits[searchCur];
+  viewer.search = { hits: by, cur: cur ? { page: cur.page, i: by.get(cur.page).indexOf(cur) } : null };
+  viewer.requestInk();
+  if (searchHits.length) $('#searchCount').textContent = `${searchCur + 1} / ${searchHits.length}${done < n ? '…' : ''}`;
+  else if (done < n) $('#searchCount').textContent = `찾는 중… ${done}/${n}쪽`;
+}
+
+function showSearchHit(move) {
+  const hm = searchHits[searchCur];
+  if (!hm) return;
+  updateSearchView(1, 1);
+  if (move) {
+    const r = hm.rects[0];
+    viewer.revealRect(hm.page, r);
+  }
+}
+function stepSearch(dir) {
+  if (!searchHits.length) { runSearch(); return; }
+  searchCur = (searchCur + dir + searchHits.length) % searchHits.length;
+  showSearchHit(true);
+  $('#searchCount').textContent = `${searchCur + 1} / ${searchHits.length}`;
+}
+
+$('#btnSearch').addEventListener('click', () => ($('#searchBar').hidden ? openSearch() : closeSearch()));
+$('#searchClose').addEventListener('click', closeSearch);
+$('#searchNext').addEventListener('click', () => stepSearch(1));
+$('#searchPrev').addEventListener('click', () => stepSearch(-1));
+$('#searchInput').addEventListener('input', debounce(() => runSearch(), 250));
+$('#searchInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); stepSearch(e.shiftKey ? -1 : 1); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+});
+
 // ───────────────────────────── 링크 ─────────────────────────────
 
 let backAnchor = null;
@@ -2330,6 +2448,8 @@ $('#btnRedo').addEventListener('click', doRedo);
 
 document.addEventListener('keydown', (e) => {
   if (state.screen !== 'editor') return;
+  // Ctrl+F: 브라우저 찾기 대신 앱 검색 (PDF 글자는 그림으로 그려져 브라우저가 못 찾음)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && e.target.id !== 'textEditor') { e.preventDefault(); openSearch(); return; }
   if (e.target.closest?.('input, textarea, select')) {
     if (e.target.id === 'textEditor' && e.key === 'Escape') { e.preventDefault(); commitTextEdit(); }
     return;

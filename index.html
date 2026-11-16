@@ -36,6 +36,7 @@
     <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" opacity=".45"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
     <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" opacity=".45"/><path d="M8 10.5V8a4 4 0 0 1 7.7-1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity=".45"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 15.5 20.5 20.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 9v4.2l2.6 1.6M9.5 3h5M12 3v2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v9.3a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
     <symbol id="i-home" viewBox="0 0 24 24"><path d="M4 11l8-6.5 8 6.5M6.5 9.5V19.5h11V9.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></symbol>
@@ -104,6 +105,7 @@
       <button class="page-ind" id="pageInd">1 / 1</button>
       <select class="surf-bg" id="surfBg" title="배경 무늬" hidden><option value="blank">무지</option><option value="lined">줄</option><option value="grid">모눈</option><option value="dot">점</option></select>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
+      <button class="icon-btn" id="btnSearch" title="글자 찾기 (Ctrl+F)"><svg><use href="#i-search"/></svg></button>
       <button class="icon-btn" id="btnClock" title="스톱워치·타이머"><svg><use href="#i-clock"/></svg></button>
       <button class="icon-btn" id="btnLayers" title="레이어"><svg><use href="#i-layers"/></svg></button>
       <button class="icon-btn" id="btnAi" title="AI 도우미 (회의록·맞춤법·번역)"><svg><use href="#i-ai"/></svg></button>
@@ -175,6 +177,14 @@
         </div>
         <textarea id="textEditor" class="text-editor" data-ui hidden spellcheck="false" rows="1"></textarea>
         <div id="zoomBadge" class="zoom-badge" hidden>100%</div>
+        <div id="searchBar" class="search-bar" data-ui hidden>
+          <svg><use href="#i-search"/></svg>
+          <input type="search" id="searchInput" placeholder="PDF 글자·직접 쓴 글 찾기" autocomplete="off" spellcheck="false" enterkeyhint="search">
+          <span class="search-count" id="searchCount"></span>
+          <button class="icon-btn sm" id="searchPrev" title="이전 (Shift+Enter)">▲</button>
+          <button class="icon-btn sm" id="searchNext" title="다음 (Enter)">▼</button>
+          <button class="icon-btn sm" id="searchClose" title="닫기 (Esc)"><svg><use href="#i-close"/></svg></button>
+        </div>
       </div>
       <div id="viewerMsg" class="viewer-msg" hidden></div>
       <button id="layerChip" class="layer-chip" data-ui title="현재 레이어 (탭하면 레이어 패널)"><svg><use href="#i-layers"/></svg><span></span></button>

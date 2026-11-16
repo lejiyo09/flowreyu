@@ -196,6 +196,17 @@ body.drag-over #library .lib-body { outline: 3px dashed var(--accent); outline-o
   font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   user-select: text; -webkit-user-select: text;
 }
+.search-bar {
+  position: absolute; top: 10px; right: 12px; z-index: 30; pointer-events: auto; display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px 4px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  width: min(420px, calc(100% - 24px));
+}
+.search-bar[hidden] { display: none; }
+.search-bar > svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
+.search-bar input { flex: 1; min-width: 0; height: 32px; border: 0; background: none; color: inherit; font-size: 15px; outline: none; }
+.search-count { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.search-count.none { color: var(--danger); }
+:root.glass .search-bar { background: var(--surface-2); }
 .zoom-badge {
   position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
   background: rgba(20, 22, 26, 0.75); color: #fff; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-variant-numeric: tabular-nums;

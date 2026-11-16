@@ -61,6 +61,7 @@ export class Viewer extends Emitter {
     this._renderGen = 0;
     this.selection = null; // {page, ids:Set, m:{s,ox,oy,dx,dy}} 이동 중 미리보기
     this.hidden = null; // 편집 중 숨길 객체 id (텍스트 편집)
+    this.search = null; // 검색 강조 {hits: Map(page → [{rects}]), cur: {page, i}}
     this._ro = new ResizeObserver(() => this.resize());
     this._ro.observe(this.el);
     this.resize(true);
@@ -688,12 +689,40 @@ export class Viewer extends Emitter {
       hl.restore();
       ink.restore();
     }
+    if (this.search) this._drawSearch();
     this.emit('inkdrawn');
+  }
+
+  /** 검색 결과 강조: 형광펜 층(곱하기)에 노란 상자, 지금 결과는 주황 */
+  _drawSearch() {
+    const hl = this.hlCtx, { hits, cur } = this.search;
+    for (const p of this.visiblePages(0.05)) {
+      const list = hits.get(p.index);
+      if (!list) continue;
+      hl.save();
+      this.pageTransform(hl, p);
+      list.forEach((m, i) => {
+        const now = cur && cur.page === p.index && cur.i === i;
+        hl.fillStyle = now ? 'rgb(255,150,40)' : 'rgb(255,230,80)';
+        for (const r of m.rects) hl.fillRect(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
+      });
+      hl.restore();
+    }
+  }
+
+  /** 페이지 사각형이 화면 가운데에 오게 (배율 그대로, 너무 작으면 읽을 만큼 확대) */
+  revealRect(page, r) {
+    const p = this.pages[page];
+    if (!p) return;
+    let z = this.cam.z;
+    if (r.h * z < 10) z = Math.min(this.maxZ(), 14 / Math.max(r.h, 0.1));
+    const cx = p.x + r.x + r.w / 2, cy = p.y + r.y + r.h / 2;
+    this.setCamera(this.vw / 2 - cx * z, this.insetTop + (this.vh - this.insetTop) / 2 - cy * z, z);
   }
 
   /** 새 객체 하나만 현재 화면에 덧그린다. 전체 다시 그리기가 필요한 상태면 false */
   appendItem(page, item) {
-    if (this._inkFrame || this.selection?.m || this.hidden || this.inkOffset || this.replay) return false;
+    if (this._inkFrame || this.selection?.m || this.hidden || this.inkOffset || this.replay || this.search) return false;
     if (!onTopLayer(item)) return false; // 아래 레이어에 넣은 객체는 위 레이어 밑에 그려야 하므로 전체 다시 그림
     const p = this.pages[page];
     if (!p) return false;
