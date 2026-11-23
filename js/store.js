@@ -211,7 +211,8 @@ export async function duplicateDoc(id, newId, name, newBlobId) {
   const blobs = await req2p(bs.index('byDoc').getAll(IDBKeyRange.only(id)));
   const map = new Map(blobs.map((b) => [b.id, newBlobId(b)]));
   const t = Date.now();
-  ds.put({ ...meta, id: newId, name, created: t, updated: t, opened: 0 });
+  const source = meta.source?.blob && map.has(meta.source.blob) ? { ...meta.source, blob: map.get(meta.source.blob) } : meta.source; // 가져온 원본(Word·한글) 첨부도 사본 쪽으로
+  ds.put({ ...meta, id: newId, name, created: t, updated: t, opened: 0, ...(source ? { source } : {}) });
   if (file) fs.put({ ...file, id: newId });
   for (const b of blobs) bs.put({ ...b, id: map.get(b.id), docId: newId });
   for (const p of pages) {

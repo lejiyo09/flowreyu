@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const root = path.join(__dirname, '..');
 const INCLUDE = ['index.html', 'manifest.webmanifest', 'css', 'js', 'icons', 'vendor'];
 const SKIP = /(\.map|LICENSE(\.md)?|\.d\.mts)$/;
+// 한글 엔진(약 9MB)은 미리 받지 않고 한글 파일을 처음 열 때 받아 따로 캐시 (버전: 그 파일들의 해시)
+const LAZY = 'vendor/hwpjs/';
 
 function walk(rel, out) {
   const abs = path.join(root, rel);
@@ -19,14 +21,19 @@ function walk(rel, out) {
   return out;
 }
 
-const files = INCLUDE.flatMap((p) => walk(p, []));
+const all = INCLUDE.flatMap((p) => walk(p, []));
+const files = all.filter((f) => !f.startsWith(LAZY));
+const lazy = all.filter((f) => f.startsWith(LAZY));
+const lh = crypto.createHash('sha256');
+for (const f of lazy) { lh.update(f); lh.update(fs.readFileSync(path.join(root, f))); }
+const lazyVersion = lh.digest('hex').slice(0, 12);
 const hash = crypto.createHash('sha256');
 for (const f of files) { hash.update(f); hash.update(fs.readFileSync(path.join(root, f))); }
 const version = hash.digest('hex').slice(0, 12);
 
 const swPath = path.join(root, 'sw.js');
 const sw = fs.readFileSync(swPath, 'utf8');
-const block = `// <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)\nconst VERSION = '${version}';\nconst PRECACHE = ${JSON.stringify(['./', ...files], null, 0).replace(/","/g, '",\n  "').replace('["', '[\n  "').replace('"]', '",\n]')};\n// </precache>`;
+const block = `// <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)\nconst VERSION = '${version}';\nconst LAZY_VERSION = '${lazyVersion}'; // vendor/hwpjs/ (처음 쓸 때 받음)\nconst PRECACHE = ${JSON.stringify(['./', ...files], null, 0).replace(/","/g, '",\n  "').replace('["', '[\n  "').replace('"]', '",\n]')};\n// </precache>`;
 const next = sw.replace(/\/\/ <precache>[\s\S]*?\/\/ <\/precache>/, block);
 if (process.argv.includes('--check')) {
   if (next !== sw) { console.error('sw.js 사전 캐시 목록이 오래됐습니다. `node tools/gen-sw.js` 를 실행하세요.'); process.exit(1); }

@@ -7,7 +7,8 @@
 //   (실행 중에 코드가 섞이지 않도록 자동 교체는 하지 않는다)
 
 // <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)
-const VERSION = 'f0e8a1dea585';
+const VERSION = '0a559dc6ff5f';
+const LAZY_VERSION = '192e6e09caf0'; // vendor/hwpjs/ (처음 쓸 때 받음)
 const PRECACHE = [
   "./",
   "index.html",
@@ -24,6 +25,7 @@ const PRECACHE = [
   "js/export.js",
   "js/gallery.js",
   "js/guides.js",
+  "js/hwp.js",
   "js/ink.js",
   "js/input.js",
   "js/main.js",
@@ -257,6 +259,8 @@ const PRECACHE = [
 // </precache>
 
 const CACHE = `flexnote-${VERSION}`;
+// 한글 엔진(vendor/hwpjs, 약 9MB): 처음 쓸 때 받아 이 캐시에 — 앱이 업데이트돼도 엔진이 그대로면 다시 받지 않음
+const LAZY_CACHE = `flexnote-lazy-${LAZY_VERSION}`;
 
 self.addEventListener('install', (e) => {
   e.waitUntil((async () => {
@@ -268,7 +272,7 @@ self.addEventListener('install', (e) => {
 
 self.addEventListener('activate', (e) => {
   e.waitUntil((async () => {
-    for (const k of await caches.keys()) if (k.startsWith('flexnote-') && k !== CACHE) await caches.delete(k);
+    for (const k of await caches.keys()) if (k.startsWith('flexnote-') && k !== CACHE && k !== LAZY_CACHE) await caches.delete(k);
     await self.clients.claim();
   })());
 });
@@ -292,6 +296,14 @@ self.addEventListener('fetch', (e) => {
     }
     const hit = await cache.match(req, { ignoreSearch: true });
     if (hit) return hit;
+    if (url.pathname.includes('/vendor/hwpjs/')) { // 큰 파일: 시간 제한 없이 받고 보관 (다음부터 오프라인으로도)
+      const lazy = await caches.open(LAZY_CACHE);
+      const got = await lazy.match(req, { ignoreSearch: true });
+      if (got) return got;
+      const res = await fetch(req);
+      if (res.ok) await lazy.put(req, res.clone()).catch(() => {});
+      return res;
+    }
     // 목록에 없는 파일: 네트워크 (3초 넘으면 실패 처리해 화면이 멈춘 것처럼 보이지 않게)
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 3000);

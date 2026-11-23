@@ -1,0 +1,12 @@
+{
+  "name": "flexnote-vendor-hwpjs",
+  "private": true,
+  "description": "한글(HWP·HWPX) 편집 엔진 @ohah/hwpjs 의 브라우저용 진입점(root·runtime·vanilla)을 vendor/hwpjs/hwpjs.mjs 한 파일로 묶고 worker.js·hwpjs.wasm 을 복사한다. 앱은 빌드 없이 그 결과만 쓴다. 다시 묶기: npm i && npm run build",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "@ohah/hwpjs": "0.1.2"
+  }
+}

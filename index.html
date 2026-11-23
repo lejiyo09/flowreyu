@@ -163,6 +163,27 @@
     </span>
   </div>
 
+  <div class="fmt-bar" id="hwpBar" data-ui hidden>
+    <span class="hb-badge" title="한글 형식 그대로 편집 (변환하지 않음)">한글</span>
+    <button data-hb="undo" title="실행 취소 (Ctrl+Z)" disabled>↶</button>
+    <button data-hb="redo" title="다시 실행 (Ctrl+Y)" disabled>↷</button>
+    <span class="fb-sep"></span>
+    <select id="hbSize" title="글자 크기 (pt) — 글자를 선택한 뒤"><option value="">크기</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option></select>
+    <button data-hb="bold" title="굵게 (같은 선택에 다시 누르면 끄기)"><b>가</b></button>
+    <button data-hb="italic" title="기울임"><i>가</i></button>
+    <button data-hb="underline" title="밑줄"><u>가</u></button>
+    <button data-hb="strike" title="취소선"><s>가</s></button>
+    <label class="fb-color" title="글자색"><span class="fb-a">가</span><input type="color" id="hbColor" value="#c62828"></label>
+    <span class="fb-sep"></span>
+    <button data-hb="left" title="왼쪽 정렬">⯇</button>
+    <button data-hb="center" title="가운데 정렬">≡</button>
+    <button data-hb="right" title="오른쪽 정렬">⯈</button>
+    <button data-hb="justify" title="양쪽 정렬">☰</button>
+    <span class="fb-sep"></span>
+    <button data-hb="save" class="txt" title="한글 파일로 저장 (원래 형식 .hwp/.hwpx)">한글 저장</button>
+    <button data-hb="info" class="txt" title="원본 파일 정보와 지원 범위">원본 정보</button>
+  </div>
+
   <div class="work">
     <aside id="thumbs" class="thumbs" hidden>
       <div class="thumbs-head">
@@ -238,6 +259,7 @@
       <button id="layerChip" class="layer-chip" data-ui title="현재 레이어 (탭하면 레이어 패널)"><svg><use href="#i-layers"/></svg><span></span></button>
       <button id="backChip" class="back-chip" data-ui hidden><svg><use href="#i-back"/></svg><span></span></button>
     </main>
+    <div id="hwpHost" class="hwp-host" hidden></div>
   </div>
 
   <nav id="toolbar" class="toolbar dock-bottom" data-ui>
