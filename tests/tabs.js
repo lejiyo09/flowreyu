@@ -87,6 +87,15 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.waitForTimeout(300);
   await page.click('#btnBack');
   await page.waitForSelector('#library:not([hidden])');
+  // 노트 목록 화면에도 열어 둔 노트 탭: 누르면 그 노트로, × 는 탭만 닫기
+  const libTabs = () => page.$$eval('#libTabs .tab .tab-name', (l) => l.map((x) => x.textContent));
+  check('library shows open-note tabs', await page.locator('#libTabs').isVisible() && JSON.stringify(await libTabs()) === '["links","sample"]', JSON.stringify(await libTabs()));
+  await page.click('#libTabs .tab:has-text("sample")');
+  await page.waitForSelector('#editor:not([hidden])');
+  await page.waitForTimeout(500);
+  check('tapping a library tab opens that note', await page.evaluate(() => __flexnote.state.doc?.meta.name) === 'sample');
+  await page.click('#btnBack');
+  await page.waitForSelector('#library:not([hidden])');
   await page.click('.doc-card:has-text("links")', { button: 'right' });
   await page.click('.card-menu [data-a=del]');
   await page.waitForTimeout(500);

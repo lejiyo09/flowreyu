@@ -1271,29 +1271,44 @@ function dropTab(id) {
   renderTabs();
 }
 function renderTabs() {
-  const bar = $('#tabBar');
+  // 편집 화면: 탭 2개 이상일 때. 노트 목록 화면: 열어 둔 노트가 하나라도 있으면 (눌러서 바로 이어서)
+  const bar = $('#tabBar'), lib = $('#libTabs');
   bar.hidden = state.screen !== 'editor' || tabs.length < 2;
+  lib.hidden = state.screen !== 'library' || tabs.length < 1;
+  fillTabs(bar, state.doc?.id, true);
+  fillTabs(lib, null, false);
+  updateGlassInset();
+}
+function fillTabs(bar, activeId, withAdd) {
   bar.innerHTML = '';
+  if (bar.hidden) return;
+  if (!withAdd) {
+    const lbl = document.createElement('span');
+    lbl.className = 'tab-label';
+    lbl.textContent = '열어 둔 노트';
+    bar.appendChild(lbl);
+  }
   for (const t of tabs) {
     const el = document.createElement('div');
-    el.className = 'tab' + (state.doc?.id === t.id ? ' on' : '');
+    el.className = 'tab' + (activeId === t.id ? ' on' : '');
     el.dataset.id = t.id;
     el.title = t.name;
     el.innerHTML = `<span class="tab-name">${escapeHtml(t.name)}</span><button class="tab-x" title="탭 닫기">×</button>`;
     el.addEventListener('click', (e) => {
       if (e.target.closest('.tab-x')) { closeTab(t.id); return; }
-      if (state.doc?.id !== t.id) openDoc(t.id);
+      if (state.doc?.id !== t.id || state.screen !== 'editor') openDoc(t.id);
     });
     bar.appendChild(el);
   }
-  const add = document.createElement('button');
-  add.className = 'tab-add';
-  add.title = '파일 열기: PDF · Word · 한글 (여러 개 고를 수 있음)';
-  add.textContent = '+';
-  add.addEventListener('click', () => $('#fileInput').click());
-  bar.appendChild(add);
+  if (withAdd) {
+    const add = document.createElement('button');
+    add.className = 'tab-add';
+    add.title = '파일 열기: PDF · Word · 한글 (여러 개 고를 수 있음)';
+    add.textContent = '+';
+    add.addEventListener('click', () => $('#fileInput').click());
+    bar.appendChild(add);
+  }
   bar.querySelector('.tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  updateGlassInset();
 }
 /** 탭 닫기: 지금 보는 탭이면 옆 탭으로 (마지막이면 홈으로) */
 async function closeTab(id) {

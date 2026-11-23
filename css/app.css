@@ -682,3 +682,9 @@ input[type=range] { accent-color: var(--accent); }
 :root.glass #editor > .tab-bar .tab { background: transparent; border-color: var(--glass-line); }
 :root.glass #editor > .tab-bar .tab.on { background: var(--glass-bg-strong); box-shadow: 0 -1px 6px rgba(0, 0, 0, 0.06); }
 :root.glass #editor > .topbar + .tab-bar:not([hidden]) { box-shadow: var(--glass-shadow); }
+
+/* 노트 목록 화면의 열어 둔 노트 탭 */
+.lib-tabs { padding-top: 6px; }
+.lib-tabs .tab-label { align-self: center; font-size: 12px; color: var(--muted); padding: 0 6px 0 4px; flex: none; }
+:root.glass .lib-tabs { background: var(--glass-bg-strong); border-color: var(--glass-line); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); }
+:root.glass .lib-tabs .tab { background: transparent; border-color: var(--glass-line); }
