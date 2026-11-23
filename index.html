@@ -103,6 +103,7 @@
         <button class="icon-btn sm" id="btnZoomIn" title="확대"><svg><use href="#i-plus"/></svg></button>
       </div>
       <button class="page-ind" id="pageInd">1 / 1</button>
+      <button class="icon-btn sm" id="btnAddPageTop" title="페이지 추가 (빈 페이지 · 다른 PDF 페이지)"><svg><use href="#i-plus"/></svg></button>
       <select class="surf-bg" id="surfBg" title="배경 무늬" hidden><option value="blank">무지</option><option value="lined">줄</option><option value="grid">모눈</option><option value="dot">점</option></select>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
       <button class="icon-btn" id="btnSearch" title="글자 찾기 (Ctrl+F)"><svg><use href="#i-search"/></svg></button>
@@ -114,6 +115,7 @@
       <button class="icon-btn" id="btnSettings" title="설정"><svg><use href="#i-gear"/></svg></button>
     </div>
   </header>
+  <nav class="tab-bar" id="tabBar" data-ui hidden></nav>
 
   <div class="work">
     <aside id="thumbs" class="thumbs" hidden>
@@ -509,12 +511,16 @@
       <div class="row"><span>위치</span>
         <select id="apWhere"><option value="after">현재 페이지 뒤</option><option value="before">현재 페이지 앞</option><option value="end">맨 뒤</option></select>
       </div>
-      <div class="row"><span>속지</span>
+      <div class="row"><span>내용</span>
+        <select id="apSource"><option value="blank">빈 페이지</option><option value="pdf">다른 PDF 파일의 페이지</option></select>
+      </div>
+      <div class="row" id="apTemplateRow"><span>속지</span>
         <select id="apTemplate"><option value="blank">무지</option><option value="lined">줄 노트</option><option value="grid">모눈 (5mm)</option><option value="dot">점 격자</option></select>
       </div>
-      <div class="row"><span>개수</span><input type="number" id="apCount" value="1" min="1" max="50"></div>
+      <div class="row" id="apCountRow"><span>개수</span><input type="number" id="apCount" value="1" min="1" max="50"></div>
+      <p class="muted small" id="apPdfHint" style="margin:6px 0 0" hidden>PDF를 고르면 그 파일의 모든 페이지를 원본 그대로(글자·그림 포함) 끼워 넣습니다. 기존 필기는 자기 페이지에 그대로 남습니다.</p>
     </div>
-    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">추가</button></footer>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok" id="apOk">추가</button></footer>
   </form>
 </dialog>
 
@@ -534,7 +540,8 @@
 <div id="busy" class="busy" hidden><div class="busy-card"><div class="spinner"></div><span id="busyText">처리 중…</span></div></div>
 <div id="toast" class="toast" hidden></div>
 <div id="updateBar" class="update-bar" data-ui hidden><span>새 버전이 준비되었습니다</span><button class="btn sm primary">업데이트</button></div>
-<input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+<input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+<input type="file" id="insertPdfInput" accept="application/pdf,.pdf" hidden>
 <input type="file" id="imageInput" accept="image/*" hidden>
 <input type="file" id="backupInput" accept="application/json,.json" hidden>
 

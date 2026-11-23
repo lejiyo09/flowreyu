@@ -137,7 +137,10 @@ viewer.on('sized', () => { thumbs.resizeBoxes(); updatePageIndicator(); updateGl
 
 /** 글래스 디자인이면 위쪽 바가 페이지를 덮으므로, 페이지가 바 아래에서 시작하도록 뷰어에 알린다 */
 function updateGlassInset() {
-  const inset = settings.get('glass') && state.screen === 'editor' ? $('#editor > .topbar').offsetHeight : 0;
+  const glass = settings.get('glass') && state.screen === 'editor';
+  const topH = $('#editor > .topbar').offsetHeight, bar = $('#tabBar');
+  bar.style.top = glass ? topH + 'px' : ''; // 글래스: 위쪽 바처럼 화면 위에 떠 있음 → 그 아래에
+  const inset = glass ? topH + (bar.hidden ? 0 : bar.offsetHeight) : 0;
   if (inset === viewer.insetTop) return;
   const dy = inset - viewer.insetTop;
   viewer.insetTop = inset;
@@ -406,6 +409,8 @@ async function renameDoc(id, cur) {
   const n = name.trim().slice(0, 120);
   await store.patchDoc(id, { name: n });
   if (state.doc?.id === id) { state.doc.meta.name = n; $('#docTitle').textContent = n; updatePageTitle(); }
+  const tab = tabs.find((t) => t.id === id);
+  if (tab) { tab.name = n; saveTabs(); renderTabs(); }
   toast('이름을 바꿨습니다');
   return n;
 }
@@ -431,7 +436,7 @@ async function cardAction(a, d) {
     renderLibrary();
   } else if (a === 'del') {
     if (!confirm(`"${d.name}"을(를) 삭제할까요?\nPDF와 모든 필기가 삭제되며 되돌릴 수 없습니다.`)) return;
-    try { await store.deleteDoc(d.id); toast('삭제했습니다'); }
+    try { await store.deleteDoc(d.id); dropTab(d.id); toast('삭제했습니다'); }
     catch (err) { toast('삭제 실패: ' + store.describeError(err), { error: true }); }
     renderLibrary();
   }
@@ -445,6 +450,7 @@ function showScreen(name) {
   $('#library').hidden = name !== 'library';
   $('#editor').hidden = name !== 'editor';
   if (name === 'editor') { applyToolbarPos(); viewer.resize(true); updateGlassInset(); }
+  renderTabs();
   if (name !== 'editor') document.documentElement.style.removeProperty('--tb-space');
   updatePageTitle();
 }
@@ -534,16 +540,101 @@ async function importFile(file) {
 }
 
 $('#btnOpenPdf').addEventListener('click', () => $('#fileInput').click());
-$('#fileInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; importFile(f); });
+$('#fileInput').addEventListener('change', (e) => { const fs = [...e.target.files]; e.target.value = ''; importFiles(fs); });
+
+/** PDF 여러 개를 한 번에: 모두 가져와 탭으로 열어 두고 첫 파일을 보여 줌 */
+async function importFiles(files) {
+  files = files.filter((f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
+  if (files.length <= 1) { if (files[0]) importFile(files[0]); return; }
+  const ids = [], failed = [];
+  for (let i = 0; i < files.length; i++) {
+    busy(`PDF 불러오는 중… ${i + 1}/${files.length} "${files[i].name}"`);
+    try { ids.push(await importPdfBytes(await files[i].arrayBuffer(), files[i].name.replace(/\.pdf$/i, ''))); }
+    catch (e) { console.error(e); failed.push(files[i].name); }
+  }
+  busy(null);
+  for (const id of ids) { const m = await store.getDoc(id).catch(() => null); if (m) addTab(m); }
+  if (failed.length) toast(`열지 못한 파일: ${failed.join(', ')}`, { error: true, ms: 6000 });
+  if (ids.length) { await openDoc(ids[0]); toast(`PDF ${ids.length}개를 탭으로 열었습니다`, { ms: 2200 }); }
+}
 document.addEventListener('dragover', (e) => { if (state.screen === 'library') { e.preventDefault(); document.body.classList.add('drag-over'); } });
 document.addEventListener('dragleave', () => document.body.classList.remove('drag-over'));
 document.addEventListener('drop', (e) => {
   document.body.classList.remove('drag-over');
   if (state.screen !== 'library') return;
   e.preventDefault();
-  const f = [...(e.dataTransfer?.files || [])].find((x) => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name));
-  if (f) importFile(f);
+  importFiles([...(e.dataTransfer?.files || [])]);
 });
+
+// ───────────────────────────── 탭: 여러 노트를 열어 두고 오가기 ─────────────────────────────
+// 탭 목록은 저장해 두어 다시 켜도 유지. 탭을 바꾸면 지금 노트는 저장하고 닫은 뒤 다른 노트를 연다
+// (실행 취소 기록은 노트마다 따로라 탭을 바꾸면 이어지지 않음). 최근 PDF 몇 개는 읽은 결과를 기억해 바로 열림.
+let tabs = []; // [{id, name}]
+const pdfCache = new Map(); // id → {pdf, blob} (지금 안 보는 탭의 PDF)
+const MAX_PDF_CACHE = 3; // 메모리 4GB 크롬북 고려
+
+function saveTabs() { store.kvSet('tabs', tabs).catch(() => {}); }
+function addTab(meta) {
+  const t = tabs.find((x) => x.id === meta.id);
+  if (t) t.name = meta.name; else tabs.push({ id: meta.id, name: meta.name });
+  saveTabs();
+}
+function cachePdf(id, pdf, blob) {
+  pdfCache.set(id, { pdf, blob });
+  while (pdfCache.size > MAX_PDF_CACHE) {
+    const [old, v] = pdfCache.entries().next().value;
+    pdfCache.delete(old);
+    v.pdf.destroy().catch(() => {});
+  }
+}
+/** 탭 목록에서 빼기 (노트 삭제 등) */
+function dropTab(id) {
+  tabs = tabs.filter((t) => t.id !== id);
+  const c = pdfCache.get(id);
+  if (c) { pdfCache.delete(id); c.pdf.destroy().catch(() => {}); }
+  saveTabs();
+  renderTabs();
+}
+function renderTabs() {
+  const bar = $('#tabBar');
+  bar.hidden = state.screen !== 'editor' || tabs.length < 2;
+  bar.innerHTML = '';
+  for (const t of tabs) {
+    const el = document.createElement('div');
+    el.className = 'tab' + (state.doc?.id === t.id ? ' on' : '');
+    el.dataset.id = t.id;
+    el.title = t.name;
+    el.innerHTML = `<span class="tab-name">${escapeHtml(t.name)}</span><button class="tab-x" title="탭 닫기">×</button>`;
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.tab-x')) { closeTab(t.id); return; }
+      if (state.doc?.id !== t.id) openDoc(t.id);
+    });
+    bar.appendChild(el);
+  }
+  const add = document.createElement('button');
+  add.className = 'tab-add';
+  add.title = 'PDF 열기 (여러 개 고를 수 있음)';
+  add.textContent = '+';
+  add.addEventListener('click', () => $('#fileInput').click());
+  bar.appendChild(add);
+  bar.querySelector('.tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  updateGlassInset();
+}
+/** 탭 닫기: 지금 보는 탭이면 옆 탭으로 (마지막이면 홈으로) */
+async function closeTab(id) {
+  const i = tabs.findIndex((t) => t.id === id);
+  if (i < 0) return;
+  if (state.doc?.id !== id) { dropTab(id); return; }
+  const next = tabs[i + 1] || tabs[i - 1];
+  if (next) {
+    await openDoc(next.id);
+    if (state.doc?.id === next.id) dropTab(id); // 저장 실패로 못 옮겼으면 탭도 그대로
+  } else if (await closeDoc()) {
+    dropTab(id);
+    showScreen('library');
+    renderLibrary();
+  }
+}
 
 const KIND_LABEL = { canvas: '무한 캔버스', scroll: '무한 스크롤' };
 /** 새 노트 종류에 따라 필요한 칸만: 페이지 수는 PDF 노트만, 크기(폭)는 PDF·스크롤만 */
@@ -631,7 +722,10 @@ async function closeDoc() {
   thumbs.clear();
   $('#backChip').hidden = true;
   backAnchor = null;
-  if (state.pdf) { state.pdf.destroy().catch(() => {}); }
+  if (state.pdf) {
+    if (doc && tabs.some((t) => t.id === doc.id)) cachePdf(doc.id, state.pdf, state.blob); // 탭으로 다시 올 때 바로 열리게
+    else state.pdf.destroy().catch(() => {});
+  }
   state.doc = null; state.pdf = null; state.blob = null;
   return true;
 }
@@ -665,6 +759,7 @@ function setSurfaceUi(meta) {
   $('#btnThumbs').hidden = surf;
   if (surf && thumbs.open) { thumbs.show(false); $('#btnThumbs').classList.remove('on'); }
   $('#pageInd').hidden = meta?.kind === 'canvas';
+  $('#btnAddPageTop').hidden = surf; // 무한 캔버스·스크롤은 페이지가 없음
   $('#surfBg').hidden = !surf;
   if (surf) $('#surfBg').value = meta.bg || 'blank';
 }
@@ -712,13 +807,19 @@ async function openDoc(id) {
     if (!(await closeDoc())) { busy(null); return; }
     const meta = await store.getDoc(id);
     if (!meta) throw new Error('문서를 찾을 수 없습니다');
-    if (KIND_LABEL[meta.kind]) { await openSurfaceDoc(meta); busy(null); return; }
+    addTab(meta);
+    if (KIND_LABEL[meta.kind]) { await openSurfaceDoc(meta); renderTabs(); busy(null); return; }
     setSurfaceUi(meta);
-    let blob = await store.getFile(id);
-    if (!blob) throw new Error('PDF 원본이 저장소에 없습니다 (브라우저가 데이터를 삭제했을 수 있습니다)');
-    if (!meta.galleryChecked) blob = (await importGalleryInk(meta, blob)) || blob; // 처음 열 때 한 번: 크롬북 갤러리 필기
-    const bytes = await blob.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ ...PDF_OPTS, data: bytes }).promise;
+    let blob, pdf;
+    const cached = pdfCache.get(id);
+    if (cached) { pdfCache.delete(id); ({ blob, pdf } = cached); } // 탭 전환: 이미 읽은 PDF
+    else {
+      blob = await store.getFile(id);
+      if (!blob) throw new Error('PDF 원본이 저장소에 없습니다 (브라우저가 데이터를 삭제했을 수 있습니다)');
+      if (!meta.galleryChecked) blob = (await importGalleryInk(meta, blob)) || blob; // 처음 열 때 한 번: 크롬북 갤러리 필기
+      const bytes = await blob.arrayBuffer();
+      pdf = await pdfjsLib.getDocument({ ...PDF_OPTS, data: bytes }).promise;
+    }
     const doc = new NoteDocument(meta);
     const { skipped } = await doc.load();
     state.doc = doc; state.pdf = pdf; state.blob = blob;
@@ -736,6 +837,7 @@ async function openDoc(id) {
     updateZoomLabel();
     store.kvSet('lastDoc', id).catch(() => {});
     store.patchDoc(id, { opened: Date.now(), pageCount: pdf.numPages }).catch(() => {});
+    renderTabs();
     if (skipped) toast(`손상된 필기 데이터 ${skipped}개를 건너뛰었습니다`, { error: true, ms: 5000 });
     busy(null);
   } catch (e) {
@@ -985,14 +1087,48 @@ async function deleteCurrentPage() {
   if (ok) toast(`${cur + 1}쪽을 삭제했습니다`);
 }
 
-$('#btnAddPage').addEventListener('click', () => {
+function openAddPageDlg() {
+  if (!state.doc || viewer.surface) return;
   $('#apTemplate').value = state.doc?.meta.template || 'blank';
+  syncAddPageForm();
   $('#addPageDlg').showModal();
-});
+}
+/** 빈 페이지면 속지·개수, PDF 면 안내만 */
+function syncAddPageForm() {
+  const pdf = $('#apSource').value === 'pdf';
+  $('#apTemplateRow').hidden = pdf;
+  $('#apCountRow').hidden = pdf;
+  $('#apPdfHint').hidden = !pdf;
+  $('#apOk').textContent = pdf ? 'PDF 고르기…' : '추가';
+}
+$('#apSource').addEventListener('change', syncAddPageForm);
+$('#btnAddPage').addEventListener('click', openAddPageDlg);
+$('#btnAddPageTop').addEventListener('click', openAddPageDlg);
+let insertWhere = 'after';
 $('#addPageDlg').addEventListener('close', () => {
   if ($('#addPageDlg').returnValue !== 'ok') return;
+  if ($('#apSource').value === 'pdf') { insertWhere = $('#apWhere').value; $('#insertPdfInput').click(); return; }
   addPages($('#apWhere').value, $('#apTemplate').value, clamp(parseInt($('#apCount').value, 10) || 1, 1, 50));
 });
+$('#insertPdfInput').addEventListener('change', (e) => { const f = e.target.files[0]; e.target.value = ''; if (f) insertPdfFile(insertWhere, f); });
+
+/** 다른 PDF 의 모든 페이지를 지금 노트에 끼워 넣기 (기존 필기는 자기 페이지를 따라 번호가 옮겨짐, 한 번에 저장) */
+async function insertPdfFile(where, file) {
+  const cur = viewer.currentPage();
+  const at = where === 'before' ? cur : where === 'end' ? viewer.pages.length : cur + 1;
+  let srcBytes, n;
+  try {
+    srcBytes = await file.arrayBuffer();
+    const src = await pdfjsLib.getDocument({ ...PDF_OPTS, data: srcBytes.slice(0) }).promise; // 먼저 열어 보고 쪽수 확인
+    n = src.numPages;
+    await src.destroy();
+  } catch (e) {
+    toast(e?.name === 'PasswordException' ? '암호가 걸린 PDF는 끼워 넣을 수 없습니다' : `PDF를 열 수 없습니다: ${e?.message || e}`, { error: true, ms: 5000 });
+    return;
+  }
+  const ok = await restructure(`"${file.name}" ${n}쪽 끼워 넣는 중…`, (ex, bytes) => ex.insertPdfPages(bytes, at, srcBytes), (i) => (i >= at ? i + n : i), at);
+  if (ok) toast(`${at + 1}쪽부터 "${file.name}" ${n}쪽을 넣었습니다`);
+}
 $('#btnDelPage').addEventListener('click', deleteCurrentPage);
 
 // 마지막 페이지 아래 "페이지 추가" 버튼 (월드 좌표에 붙어 함께 움직인다)
@@ -3444,6 +3580,9 @@ async function boot() {
     }
   } catch { /* */ }
   curFolder = (await store.kvGet('libFolder').catch(() => null)) || null; // 마지막으로 보던 폴더
+  const saved = (await store.kvGet('tabs').catch(() => null)) || [];
+  const known = new Map((await store.listDocs().catch(() => [])).map((d) => [d.id, d.name]));
+  tabs = saved.filter((t) => known.has(t.id)).map((t) => ({ id: t.id, name: known.get(t.id) })); // 지워진 노트는 빼고 이름은 최신으로
   const last = await store.kvGet('lastDoc').catch(() => null);
   if (last && (await store.getDoc(last).catch(() => null))) await openDoc(last);
   else { showScreen('library'); renderLibrary(); }

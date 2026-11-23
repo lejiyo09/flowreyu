@@ -106,6 +106,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.setInputFiles('#fileInput', h.S + '/sample.pdf');
   await page.waitForSelector('#editor:not([hidden])');
   await page.waitForTimeout(800);
+  vp = await page.locator('#viewport').boundingBox(); // 노트를 여러 개 열면 탭 줄이 생겨 화면 위치가 바뀜
   await page.click('#toolbar [data-tool=pen]');
   await page.waitForTimeout(300);
   const a = await S(120, 200), b = await S(320, 260);

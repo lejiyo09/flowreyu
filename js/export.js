@@ -197,6 +197,15 @@ export async function insertBlankPage(bytes, index, { template = 'blank', width 
   return pdf.save({ useObjectStreams: true });
 }
 
+/** 다른 PDF 의 모든 페이지를 index 위치에 끼워 넣기 (원본 PDF 그대로 복사: 글자·그림·링크 유지) */
+export async function insertPdfPages(bytes, index, srcBytes) {
+  const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  const src = await PDFDocument.load(srcBytes, { updateMetadata: false });
+  const pages = await pdf.copyPages(src, src.getPageIndices());
+  pages.forEach((pg, k) => pdf.insertPage(Math.min(index + k, pdf.getPageCount()), pg));
+  return pdf.save({ useObjectStreams: true });
+}
+
 /** index 페이지 삭제 */
 export async function removePage(bytes, index) {
   const pdf = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
