@@ -7,7 +7,7 @@
 //   (실행 중에 코드가 섞이지 않도록 자동 교체는 하지 않는다)
 
 // <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)
-const VERSION = '21f32406b073';
+const VERSION = 'f0e8a1dea585';
 const PRECACHE = [
   "./",
   "index.html",
@@ -20,6 +20,7 @@ const PRECACHE = [
   "js/canvas-engine.js",
   "js/debug.js",
   "js/document.js",
+  "js/docx.js",
   "js/export.js",
   "js/gallery.js",
   "js/guides.js",
@@ -41,6 +42,7 @@ const PRECACHE = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/icon.svg",
+  "vendor/fflate/fflate.mjs",
   "vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
   "vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2",
   "vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2",

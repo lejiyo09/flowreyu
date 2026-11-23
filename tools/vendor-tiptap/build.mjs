@@ -10,6 +10,10 @@ for (const dir of ['@tiptap/core', '@tiptap/pm', 'prosemirror-model', 'prosemirr
   try { const p = `node_modules/${dir}/`; const f = readdirSync(p).find((x) => /^licen[sc]e/i.test(x)); if (f) lic.push(`── ${dir} ──\n` + readFileSync(p + f, 'utf8')); } catch { /* */ }
 }
 writeFileSync(out + 'tiptap/LICENSES.txt', lic.join('\n\n'));
+// DOCX(zip) 읽기·쓰기
+mkdirSync(out + 'fflate', { recursive: true });
+await build({ stdin: { contents: "export { unzipSync, zipSync, strFromU8, strToU8 } from 'fflate';", resolveDir: '.' }, bundle: true, format: 'esm', minify: true, target: 'es2020', outfile: out + 'fflate/fflate.mjs', legalComments: 'none' });
+cpSync('node_modules/fflate/LICENSE', out + 'fflate/LICENSE');
 mkdirSync(out + 'katex', { recursive: true });
 cpSync('node_modules/katex/dist/katex.min.css', out + 'katex/katex.min.css');
 cpSync('node_modules/katex/dist/fonts', out + 'katex/fonts', { recursive: true, filter: (s) => !/\.(ttf|woff)$/.test(s) || s.endsWith('.woff2') || !s.includes('.') });

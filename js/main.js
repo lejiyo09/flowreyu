@@ -263,7 +263,7 @@ async function renderLibrary() {
         <button data-a="rename">✎ 이름</button><button data-a="move">↪ 이동</button><button data-a="dup">⧉ 사본</button><button data-a="del" class="danger">삭제</button>
       </div>
       <div class="name">${escapeHtml(d.name)}</div>
-      <div class="meta">${d.kind === 'typing' ? `타이핑 · ${d.pageCount || 1}쪽` : KIND_LABEL[d.kind] || `${d.pageCount || '?'}쪽`} · ${formatDate(d.updated || d.created)}</div>`;
+      <div class="meta">${d.kind === 'typing' ? `${d.source ? d.source.format.toUpperCase() : '타이핑'} · ${d.pageCount || 1}쪽` : KIND_LABEL[d.kind] || `${d.pageCount || '?'}쪽`} · ${formatDate(d.updated || d.created)}</div>`;
     const longPressed = bindCardMenu(card, (at) => cardMenu(at, d));
     card.addEventListener('click', (e) => {
       if (longPressed()) return; // 길게 누른 뒤 손을 뗀 것은 열기 아님
@@ -531,8 +531,59 @@ async function importGalleryInk(meta, blob) {
   return cleaned;
 }
 
+const extOf = (f) => (f.name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+const OPENABLE = (f) => ['pdf', 'docx', 'doc', 'hwp', 'hwpx'].includes(extOf(f)) || /pdf$/i.test(f.type);
+
+/** 아직 직접 열 수 없는 형식: 이유와 대안을 알림 (조용히 무시하지 않음) */
+function unsupportedFile(f) {
+  const e = extOf(f);
+  if (e === 'doc') return '옛 Word 형식(.doc)은 아직 직접 열 수 없습니다. Word·한글에서 .docx 로 다시 저장해 열어 주세요';
+  if (e === 'hwp' || e === 'hwpx') return '한글(HWP·HWPX) 파일 열기는 다음 단계에서 지원합니다. 지금은 한글에서 .docx 로 저장해 열 수 있습니다';
+  return null;
+}
+
+/** 파일 하나 가져오기 → 노트 id (열지는 않음). Word 는 타이핑형 노트로 */
+async function importOne(file) {
+  const why = unsupportedFile(file);
+  if (why) throw Object.assign(new Error(why), { friendly: true });
+  if (extOf(file) === 'docx') return importDocxFile(file);
+  return importPdfBytes(await file.arrayBuffer(), file.name.replace(/\.pdf$/i, ''));
+}
+
+/** Word(.docx) → 타이핑형 노트. 원본 파일은 첨부로 보관 (고치지 않고 저장하면 그대로 내려줌) */
+async function importDocxFile(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { importDocx } = await import('./docx.js');
+  const res = importDocx(bytes);
+  const t = Date.now();
+  const id = uid('d'), srcId = uid('src');
+  const name = file.name.replace(/\.docx$/i, '');
+  const meta = {
+    id, name, kind: 'typing', noteType: 'typing', page: res.page, pageCount: 1, created: t, updated: t, opened: t, thumb: null, view: null, folder: curFolder,
+    source: { format: 'docx', name: file.name, blob: srcId, size: bytes.byteLength, imported: t, unchanged: true, warnings: res.warnings, approx: res.approx },
+  };
+  await store.addDocWithFile(meta, new Blob([JSON.stringify(res.content)], { type: 'application/json' }));
+  await store.putBlob({ id: srcId, docId: id, kind: 'source', name: file.name, data: new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }) });
+  store.requestPersist();
+  return id;
+}
+
 async function importFile(file) {
   if (!file) return;
+  if (extOf(file) !== 'pdf' && !/pdf$/i.test(file.type)) {
+    busy(`"${file.name}" 불러오는 중…`);
+    try {
+      const id = await importOne(file);
+      busy(null);
+      await openDoc(id);
+      if (typing?.meta.source) showDocReport(true);
+    } catch (e) {
+      busy(null);
+      console.error(e);
+      toast(e.friendly ? e.message : `"${file.name}" 을(를) 열 수 없습니다: ${e?.message || e}`, { error: true, ms: 7000 });
+    }
+    return;
+  }
   busy(`"${file.name}" 불러오는 중…`);
   try {
     const bytes = await file.arrayBuffer();
@@ -554,18 +605,18 @@ $('#fileInput').addEventListener('change', (e) => { const fs = [...e.target.file
 
 /** PDF 여러 개를 한 번에: 모두 가져와 탭으로 열어 두고 첫 파일을 보여 줌 */
 async function importFiles(files) {
-  files = files.filter((f) => /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
+  files = files.filter(OPENABLE);
   if (files.length <= 1) { if (files[0]) importFile(files[0]); return; }
   const ids = [], failed = [];
   for (let i = 0; i < files.length; i++) {
-    busy(`PDF 불러오는 중… ${i + 1}/${files.length} "${files[i].name}"`);
-    try { ids.push(await importPdfBytes(await files[i].arrayBuffer(), files[i].name.replace(/\.pdf$/i, ''))); }
-    catch (e) { console.error(e); failed.push(files[i].name); }
+    busy(`파일 불러오는 중… ${i + 1}/${files.length} "${files[i].name}"`);
+    try { ids.push(await importOne(files[i])); }
+    catch (e) { console.error(e); failed.push(e.friendly ? `${files[i].name} (${extOf(files[i])} 미지원)` : files[i].name); }
   }
   busy(null);
   for (const id of ids) { const m = await store.getDoc(id).catch(() => null); if (m) addTab(m); }
   if (failed.length) toast(`열지 못한 파일: ${failed.join(', ')}`, { error: true, ms: 6000 });
-  if (ids.length) { await openDoc(ids[0]); toast(`PDF ${ids.length}개를 탭으로 열었습니다`, { ms: 2200 }); }
+  if (ids.length) { await openDoc(ids[0]); toast(`파일 ${ids.length}개를 탭으로 열었습니다`, { ms: 2200 }); }
 }
 document.addEventListener('dragover', (e) => { if (state.screen === 'library') { e.preventDefault(); document.body.classList.add('drag-over'); } });
 document.addEventListener('dragleave', () => document.body.classList.remove('drag-over'));
@@ -597,6 +648,7 @@ async function openTypingDoc(meta) {
   let content = null;
   try { content = blob ? JSON.parse(await blob.text()) : null; } catch { content = null; }
   const broken = !!blob && !content;
+  if (content) content = typingMod.migrateContent(content);
   const doc = new NoteDocument(meta);
   const { skipped } = await doc.load();
   state.doc = doc; state.pdf = null; state.blob = null;
@@ -653,6 +705,8 @@ function typingPages(n) {
 function typingChanged() {
   if (!typing) return;
   typing.dirty = true;
+  const src = typing.meta.source;
+  if (src?.unchanged) { src.unchanged = false; store.patchDoc(typing.meta.id, { source: src }).catch(() => {}); }
   renderSaveState();
   clearTimeout(typing.timer);
   typing.timer = setTimeout(() => saveTyping(), 700);
@@ -760,6 +814,7 @@ function renderFmtBar() {
   $('#fbLine').value = para.lineHeight ? String(para.lineHeight) : '';
   $('#fbSpace').value = para.spaceAfter != null ? String(para.spaceAfter) : '';
   $('#fbTable').hidden = !ed.isActive('table');
+  bar.querySelector('[data-fb=report]').hidden = !typing.meta.source;
 }
 
 // 버튼을 눌러도 편집기의 선택(커서)이 풀리지 않게
@@ -793,6 +848,8 @@ $('#fmtBar').addEventListener('click', (e) => {
     },
     pagebreak: () => { if (!c().setPageBreak().run()) toast('표 안에서는 쪽을 나눌 수 없습니다. 표 아래 문단에서 나누세요'); },
     setup: () => openPageSetup(),
+    saveDocx: () => saveTypingDocx(),
+    report: () => showDocReport(false),
     rowAfter: () => c().addRowAfter().run(), colAfter: () => c().addColumnAfter().run(),
     rowDel: () => c().deleteRow().run(), colDel: () => c().deleteColumn().run(),
     merge: () => { if (!c().mergeCells().run()) toast('합칠 칸들을 끌어서 함께 선택하세요'); },
@@ -833,6 +890,69 @@ function editMath(node, pos, kind) {
   const c = ed.chain().focus(undefined, { scrollIntoView: false }).setNodeSelection(pos);
   if (!latex.trim()) (kind === 'block' ? c.deleteBlockMath() : c.deleteInlineMath()).run();
   else (kind === 'block' ? c.updateBlockMath({ latex }) : c.updateInlineMath({ latex })).run();
+}
+
+// ── 가져온 원본 · DOCX 저장 ──
+/** 가져오기 결과: 옮기지 못한 요소 / 근사로 옮긴 요소 (fresh: 방금 가져옴 — 문제없으면 알림만) */
+function showDocReport(fresh) {
+  const src = typing?.meta.source;
+  if (!src) return;
+  const w = src.warnings || [], a = src.approx || [];
+  if (fresh && !w.length && !a.length) { toast(`"${src.name}" 을(를) 열었습니다 · 옮기지 못한 요소 없음`, { ms: 3000 }); return; }
+  $('#drTitle').textContent = fresh ? `"${src.name}" 을(를) 가져왔습니다` : '원본 파일 정보';
+  $('#drSummary').textContent = `${src.format.toUpperCase()} · ${formatBytes(src.size || 0)} · ${src.unchanged ? '아직 고치지 않음 (저장하면 원본 그대로)' : '고친 내용 있음 (저장하면 새 파일)'}`;
+  const fill = (ul, list) => { ul.innerHTML = list.map((x) => `<li>${escapeHtml(x)}</li>`).join(''); };
+  fill($('#drWarn'), w);
+  fill($('#drApprox'), a);
+  $('#docReportDlg').showModal();
+}
+$('#docReportDlg').addEventListener('close', () => { if ($('#docReportDlg').returnValue === 'original') downloadSource(); });
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename.replace(/[\\/:*?"<>|]/g, '_');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+async function downloadSource() {
+  const src = typing?.meta.source;
+  const rec = src && (await store.getBlob(src.blob).catch(() => null));
+  if (!rec) { toast('보관된 원본 파일을 찾을 수 없습니다', { error: true }); return false; }
+  downloadBlob(rec.data, src.name);
+  return true;
+}
+
+/**
+ * DOCX 로 저장: 가져온 뒤 고치지 않았으면 원본 파일 그대로. 고쳤거나 새로 만든 노트는 새로 만든 DOCX —
+ * 원본에서 옮기지 못한 요소나 저장 중 근사한 것이 있으면 먼저 알리고, 가져온 문서는 원본과 다른 이름으로.
+ */
+async function saveTypingDocx() {
+  if (!typing) return;
+  const src = typing.meta.source;
+  if (src?.format === 'docx' && src.unchanged) {
+    if (await downloadSource()) toast('고친 내용이 없어 원본 Word 파일을 그대로 내려받았습니다', { ms: 3000 });
+    return;
+  }
+  busy('DOCX 만드는 중…');
+  try {
+    await flushTyping();
+    const { exportDocx } = await import('./docx.js');
+    const { bytes, lost } = exportDocx(typing.ed.editor.getJSON(), typing.meta.page, { title: typing.meta.name });
+    busy(null);
+    const fromOriginal = src ? [...(src.warnings || [])] : [];
+    const issues = [...fromOriginal.map((x) => '원본에서 옮기지 못함: ' + x), ...lost.map((x) => '저장 중 근사: ' + x)];
+    if (issues.length && !confirm(`DOCX 로 저장합니다. 다음은 저장되지 않거나 바뀝니다:\n\n- ${issues.join('\n- ')}\n\n계속할까요?`)) return;
+    const base = src ? src.name.replace(/\.[^.]+$/, '') + ' (FlexNote 편집)' : typing.meta.name;
+    downloadBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), base + '.docx');
+    toast(src ? '새 이름으로 저장했습니다 (원본 파일은 바뀌지 않음)' : 'DOCX 로 저장했습니다', { ms: 3000 });
+  } catch (e) {
+    busy(null);
+    console.error(e);
+    toast('DOCX 저장 실패: ' + (e?.message || e), { error: true, ms: 6000 });
+  }
 }
 
 // ── 쪽 설정 ──
@@ -968,7 +1088,7 @@ function renderTabs() {
   }
   const add = document.createElement('button');
   add.className = 'tab-add';
-  add.title = 'PDF 열기 (여러 개 고를 수 있음)';
+  add.title = '파일 열기: PDF · Word (여러 개 고를 수 있음)';
   add.textContent = '+';
   add.addEventListener('click', () => $('#fileInput').click());
   bar.appendChild(add);

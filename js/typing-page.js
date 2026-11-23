@@ -12,13 +12,15 @@ export const FONTS = [
   ['Times New Roman, Times, serif', 'Times New Roman'],
   ['Consolas, Menlo, monospace', '고정폭'],
 ];
-export const DEFAULT_PAGE = { size: 'A4', orient: 'portrait', margin: { ...MARGINS.normal }, header: '', footer: '', pageNum: 'center', font: FONTS[0][0], fontSize: 10.5 };
+export const DEFAULT_PAGE = { size: 'A4', orient: 'portrait', margin: { ...MARGINS.normal }, header: '', footer: '', pageNum: 'center', font: FONTS[0][0], fontSize: 10.5, lineHeight: 1.6 };
 export const GAP = 14; // 쪽 사이 (viewer 의 PAGE_GAP 과 같게)
 
 /** 쪽 설정 → pt 크기·여백 */
 export function pageGeom(page) {
   const p = { ...DEFAULT_PAGE, ...page, margin: { ...DEFAULT_PAGE.margin, ...(page?.margin || {}) } };
-  let [w, h] = PAPER[p.size] || PAPER.A4;
+  // size 'custom': 가져온 문서의 용지 (width·height mm)
+  let [w, h] = p.size === 'custom' && p.width > 20 && p.height > 20 ? [p.width, p.height] : PAPER[p.size] || PAPER.A4;
+  if (p.size === 'custom' && w > h && p.orient !== 'landscape') [w, h] = [h, w];
   if (p.orient === 'landscape') [w, h] = [h, w];
   const m = p.margin;
   const W = w * MM, H = h * MM, mt = m.t * MM, mb = m.b * MM, ml = m.l * MM, mr = m.r * MM;

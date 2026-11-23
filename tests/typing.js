@@ -199,6 +199,16 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   }, pdfBuf.toString('base64'));
   check('real print output has every page at the paper size (landscape A4)', printed.n === (await pages()) && Math.abs(printed.w - 842) < 2 && Math.abs(printed.h - 595) < 2, JSON.stringify(printed));
 
+  // ── 새로 만든 타이핑 노트도 DOCX 로 저장 (python-docx 로 확인) ──
+  const [dlx] = await Promise.all([page.waitForEvent('download'), page.click('#fmtBar [data-fb=saveDocx]')]);
+  await dlx.saveAs(h.S + '/typing-new.docx');
+  const pyx = JSON.parse(require('child_process').execFileSync('python3', ['-I', '-c', `
+import json, sys, docx
+d = docx.Document(sys.argv[1])
+print(json.dumps({"first": d.paragraphs[0].text, "style": d.paragraphs[0].style.name, "tables": len(d.tables), "images": len(d.inline_shapes), "landscape": d.sections[0].page_width > d.sections[0].page_height, "header": d.sections[0].header.paragraphs[0].text}, ensure_ascii=False))
+`, h.S + '/typing-new.docx']).toString());
+  check('new typing note saves as DOCX (python-docx reads heading, tables, image, landscape, header)', pyx.first === '제목 문장' && pyx.style === 'Heading 1' && pyx.tables === 2 && pyx.images === 1 && pyx.landscape && pyx.header === '분기 보고서', JSON.stringify(pyx));
+
   // ── 새로고침 ──
   const before = JSON.stringify(await json());
   await page.waitForTimeout(1200);

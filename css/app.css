@@ -654,3 +654,13 @@ input[type=range] { accent-color: var(--accent); }
   .print-page .pg-break::after { display: none; }
   .print-page .pg-break { border: 0; }
 }
+/* 가져온 문서의 탭·목차 채움선 */
+.typing-doc .doc-tab { display: inline-block; min-width: 2.5em; white-space: pre; }
+.typing-doc .tab-lead { display: flex; align-items: baseline; }
+.typing-doc .tab-lead > .doc-tab { flex: 1; min-width: 1.5em; margin: 0 3px; border-bottom: 1.2px dotted currentColor; height: 0.2em; }
+.typing-doc .tab-lead-hyphen > .doc-tab { border-bottom-style: dashed; }
+.typing-doc .tab-lead-underscore > .doc-tab { border-bottom-style: solid; }
+.typing-doc img { vertical-align: bottom; }
+
+.dr-list { margin: 4px 0 10px; padding-left: 1.2em; max-height: 180px; overflow: auto; font-size: 13px; }
+.dr-list:empty::before { content: '없음'; color: var(--muted); }

@@ -67,7 +67,7 @@
   <header class="lib-head">
     <div class="brand"><img src="icons/icon.svg" alt="" width="30" height="30"><span>FlexNote</span></div>
     <div class="lib-actions">
-      <button class="btn primary" id="btnOpenPdf"><svg><use href="#i-file"/></svg><span>PDF 열기</span></button>
+      <button class="btn primary" id="btnOpenPdf" title="PDF · Word(.docx) 파일 열기 (여러 개 가능)"><svg><use href="#i-file"/></svg><span>파일 열기</span></button>
       <button class="btn" id="btnNewNote"><svg><use href="#i-note"/></svg><span>새 노트</span></button>
       <button class="btn" id="btnNewFolder" title="새 폴더"><svg><use href="#i-folder"/></svg><span>새 폴더</span></button>
       <button class="btn" id="btnLibEdit" title="노트 이름 바꾸기·사본·삭제"><svg><use href="#i-pen"/></svg><span>편집</span></button>
@@ -149,6 +149,8 @@
     <button data-fb="link" class="txt" title="하이퍼링크">링크</button>
     <button data-fb="pagebreak" class="txt" title="쪽 나누기 (Ctrl+Enter)">쪽 나눔</button>
     <button data-fb="setup" class="txt" title="쪽 설정: 용지·방향·여백·머리글·바닥글·쪽 번호">쪽 설정</button>
+    <button data-fb="saveDocx" class="txt" title="Word 파일(.docx)로 저장">DOCX 저장</button>
+    <button data-fb="report" class="txt" title="가져온 원본 파일 정보와 옮기지 못한 요소" hidden>원본 정보</button>
     <span class="fb-table" id="fbTable" hidden>
       <span class="fb-sep"></span>
       <button data-fb="rowAfter" class="txt" title="아래에 행 추가">+행</button>
@@ -555,6 +557,19 @@
   </form>
 </dialog>
 
+<dialog id="docReportDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner">
+    <header class="dlg-head"><h2 id="drTitle">문서를 가져왔습니다</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+      <p id="drSummary" style="margin:0 0 8px"></p>
+      <div id="drWarnBox"><b>옮기지 못한 요소</b> <span class="muted small">(이 노트와 다시 저장한 파일에는 없거나 바뀜)</span><ul id="drWarn" class="dr-list"></ul></div>
+      <div id="drApproxBox"><b>근사로 옮긴 요소</b> <span class="muted small">(모양이 원본과 조금 다를 수 있음)</span><ul id="drApprox" class="dr-list"></ul></div>
+      <p class="muted small" style="margin:8px 0 0">원본 파일은 이 노트에 그대로 보관합니다. 고치지 않고 "DOCX 저장"하면 원본 파일 그대로, 고친 뒤 저장하면 새로 만든 파일을 다른 이름으로 내려받습니다.</p>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="original" id="drOriginal">원본 파일 내려받기</button><span class="foot-gap" style="flex:1"></span><button class="btn primary" value="ok">확인</button></footer>
+  </form>
+</dialog>
+
 <dialog id="moveDlg" class="dlg small-dlg">
   <form method="dialog" class="dlg-inner">
     <header class="dlg-head"><h2 id="moveTitle">폴더로 이동</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
@@ -611,7 +626,7 @@
 <div id="busy" class="busy" hidden><div class="busy-card"><div class="spinner"></div><span id="busyText">처리 중…</span></div></div>
 <div id="toast" class="toast" hidden></div>
 <div id="updateBar" class="update-bar" data-ui hidden><span>새 버전이 준비되었습니다</span><button class="btn sm primary">업데이트</button></div>
-<input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+<input type="file" id="fileInput" accept="application/pdf,.pdf,.docx,.doc,.hwp,.hwpx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
 <input type="file" id="insertPdfInput" accept="application/pdf,.pdf" hidden>
 <input type="file" id="typingImageInput" accept="image/*" hidden>
 <input type="file" id="imageInput" accept="image/*" hidden>

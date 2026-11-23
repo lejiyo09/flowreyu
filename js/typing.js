@@ -158,7 +158,14 @@ const ParagraphFormat = Extension.create({
         indent: { default: 0, parseHTML: (el) => num(el.dataset.indent) || 0, renderHTML: (a) => (a.indent ? { 'data-indent': a.indent, style: `margin-left:${a.indent}px` } : {}) },
         hanging: { default: 0, parseHTML: (el) => num(el.dataset.hanging) || 0, renderHTML: (a) => (a.hanging ? { 'data-hanging': a.hanging, style: `padding-left:${a.hanging}px;text-indent:-${a.hanging}px` } : {}) },
         spaceAfter: { default: null, parseHTML: (el) => num(el.dataset.spaceAfter), renderHTML: (a) => (a.spaceAfter != null ? { 'data-space-after': a.spaceAfter, style: `margin-bottom:${a.spaceAfter}px` } : {}) },
-        lineHeight: { default: null, parseHTML: (el) => num(el.dataset.lineHeight), renderHTML: (a) => (a.lineHeight ? { 'data-line-height': a.lineHeight, style: `line-height:${a.lineHeight}` } : {}) },
+        // 숫자면 글자 크기의 배수, "12px" 처럼 단위가 있으면 고정 줄 높이 (DOCX 의 '고정' 줄 간격)
+        lineHeight: { default: null, parseHTML: (el) => { const v = el.dataset.lineHeight; return v == null ? null : /px$/.test(v) ? v : num(v); }, renderHTML: (a) => (a.lineHeight ? { 'data-line-height': a.lineHeight, style: `line-height:${a.lineHeight}` } : {}) },
+        spaceBefore: { default: null, parseHTML: (el) => num(el.dataset.spaceBefore), renderHTML: (a) => (a.spaceBefore ? { 'data-space-before': a.spaceBefore, style: `padding-top:${a.spaceBefore}px` } : {}) },
+        firstLine: { default: 0, parseHTML: (el) => num(el.dataset.firstLine) || 0, renderHTML: (a) => (a.firstLine ? { 'data-first-line': a.firstLine, style: `text-indent:${a.firstLine}px` } : {}) },
+        // 굵지 않은 제목 (가져온 문서의 제목 스타일이 굵지 않을 때): 편집기 기본 제목은 굵게 보이므로 따로 표시
+        plain: { default: false, parseHTML: (el) => el.dataset.plain === '1', renderHTML: (a) => (a.plain ? { 'data-plain': '1', style: 'font-weight:normal' } : {}) },
+        // 탭 채움선 (목차의 점선): 문단을 [앞 글] ……… [뒤 글] 로 그림
+        tabLeader: { default: null, parseHTML: (el) => el.dataset.tabLeader || null, renderHTML: (a) => (a.tabLeader ? { 'data-tab-leader': a.tabLeader, class: 'tab-lead tab-lead-' + a.tabLeader } : {}) },
       },
     }];
   },
@@ -182,6 +189,42 @@ const ParagraphFormat = Extension.create({
     };
   },
 });
+
+/** 탭 문자 (가져온 문서의 탭. 채움선 문단에서는 남은 폭을 채움) */
+const Tab = Node.create({
+  name: 'tab',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: false,
+  parseHTML() { return [{ tag: 'span.doc-tab' }]; },
+  renderHTML() { return ['span', { class: 'doc-tab' }, '\t']; },
+  renderText: () => '\t',
+});
+
+/** 표 서식: 표 배치(가운데·너비)는 style, 칸은 배경·세로 정렬·테두리/안쪽 여백(cstyle) — 가져온 DOCX 모양 유지 */
+const TableFormat = Extension.create({
+  name: 'tableFormat',
+  addGlobalAttributes() {
+    return [
+      { types: ['table'], attributes: { style: { default: null, parseHTML: (el) => el.getAttribute('style'), renderHTML: (a) => (a.style ? { style: a.style } : {}) } } },
+      {
+        types: ['tableCell', 'tableHeader'],
+        attributes: {
+          background: { default: null, parseHTML: (el) => el.dataset.bg || null, renderHTML: (a) => (a.background ? { 'data-bg': a.background, style: `background-color:${a.background}` } : {}) },
+          valign: { default: null, parseHTML: (el) => el.dataset.valign || null, renderHTML: (a) => (a.valign ? { 'data-valign': a.valign, style: `vertical-align:${a.valign}` } : {}) },
+          cstyle: { default: null, parseHTML: (el) => el.dataset.cstyle || null, renderHTML: (a) => (a.cstyle ? { 'data-cstyle': a.cstyle, style: a.cstyle } : {}) },
+        },
+      },
+    ];
+  },
+});
+
+/** 예전 문서(그림이 블록이던 때)를 지금 스키마로: 맨 위 그림을 문단으로 감쌈 */
+export function migrateContent(doc) {
+  if (!doc || !Array.isArray(doc.content)) return doc;
+  return { ...doc, content: doc.content.map((n) => (n.type === 'image' ? { type: 'paragraph', content: [n] } : n)) };
+}
 
 // ───────────────────────────── 쪽 나눔 ─────────────────────────────
 
@@ -301,13 +344,14 @@ export function createEditor(host, o) {
       Highlight.configure({ multicolor: true }),
       Subscript, Superscript,
       TableKit.configure({ table: { resizable: true, cellMinWidth: 24 } }),
-      Image.configure({ allowBase64: true, resize: { enabled: true, alwaysPreserveAspectRatio: true, minWidth: 24, minHeight: 24 } }),
+      // 그림은 글 안(문단 안)에 놓인다: 문단 정렬로 가운데·오른쪽, 글과 한 줄에도 (DOCX 의 '글자처럼 취급' 그림)
+      Image.configure({ inline: true, allowBase64: true, resize: { enabled: true, alwaysPreserveAspectRatio: true, minWidth: 16, minHeight: 16 } }),
       Mathematics.configure({
         katexOptions: { throwOnError: false },
         inlineOptions: { onClick: (node, pos) => o.onMathEdit?.(node, pos, 'inline') },
         blockOptions: { onClick: (node, pos) => o.onMathEdit?.(node, pos, 'block') },
       }),
-      PageBreak, ParagraphFormat,
+      PageBreak, ParagraphFormat, Tab, TableFormat,
       Extension.create({ name: 'pagination', addProseMirrorPlugins: () => [paginationPlugin(() => g, (n) => o.onPages?.(n))] }),
     ],
     editorProps: { attributes: { class: 'typing-doc', spellcheck: 'false' } },
@@ -328,6 +372,7 @@ export function createEditor(host, o) {
 function applyPageStyle(host, g) {
   host.style.fontFamily = g.page.font;
   host.style.fontSize = g.page.fontSize + 'px';
+  host.style.lineHeight = String(g.page.lineHeight || 1.6);
   host.style.setProperty('--page-h', g.contentH + 'px');
 }
 

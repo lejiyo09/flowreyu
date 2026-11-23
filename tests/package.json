@@ -2,12 +2,13 @@
   "name": "flexnote-tests",
   "private": true,
   "scripts": {
-    "fixtures": "mkdir -p fixtures && node mkpdf.js fixtures/sample.pdf && node mklinks.js fixtures/links.pdf && node mkimg.js fixtures/img.png && node mkbig.js fixtures/big.pdf && node mkgallery.js fixtures/gallery.pdf",
-    "test": "node ../tools/gen-sw.js --check && node func.js && node spen.js && node pages.js && node tabs.js && node links.js && node linkfix.js && node search.js && node guides.js && node eraser.js && node gestures.js && node objects.js && node rotate.js && node arrange.js && node toolbar.js && node fold.js && node notedrag.js && node checktable.js && node tabletext.js && node notebox.js && node textscroll.js && node surface.js && node typing.js && node layers.js && node clock.js && node library.js && node folders.js && node gallery.js && node audio.js && node ai.js && node mobile.js && node offline.js && node swupdate.js && node fail.js && node extra.js",
+    "fixtures": "mkdir -p fixtures && node mkpdf.js fixtures/sample.pdf && node mklinks.js fixtures/links.pdf && node mkimg.js fixtures/img.png && node mkbig.js fixtures/big.pdf && node mkgallery.js fixtures/gallery.pdf && node mkdocx.js fixtures/sample.docx",
+    "test": "node ../tools/gen-sw.js --check && node func.js && node spen.js && node pages.js && node tabs.js && node links.js && node linkfix.js && node search.js && node guides.js && node eraser.js && node gestures.js && node objects.js && node rotate.js && node arrange.js && node toolbar.js && node fold.js && node notedrag.js && node checktable.js && node tabletext.js && node notebox.js && node textscroll.js && node surface.js && node typing.js && node docx.js && node layers.js && node clock.js && node library.js && node folders.js && node gallery.js && node audio.js && node ai.js && node mobile.js && node offline.js && node swupdate.js && node fail.js && node extra.js",
     "perf": "node big2.js"
   },
   "devDependencies": {
     "playwright": "^1.48.0",
-    "pdf-lib": "1.17.1"
+    "pdf-lib": "1.17.1",
+    "docx": "9.16.0"
   }
 }
