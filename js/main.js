@@ -723,42 +723,63 @@ let hwp = null; // {session, meta, dirty, saving, error, timer}
 
 async function openHwpDoc(meta) {
   const blob = await store.getFile(meta.id);
-  if (!blob) throw new Error('한글 문서 파일이 저장소에 없습니다 (브라우저가 데이터를 삭제했을 수 있습니다)');
-  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const fresh = !blob && meta.source?.fresh ? meta.source.format : null; // 새로 만든 빈 한글 문서
+  if (!blob && !fresh) throw new Error('한글 문서 파일이 저장소에 없습니다 (브라우저가 데이터를 삭제했을 수 있습니다)');
+  const bytes = fresh || new Uint8Array(await blob.arrayBuffer());
   const doc = new NoteDocument(meta);
   await doc.load();
   state.doc = doc; state.pdf = null; state.blob = null;
   wireDoc(doc);
+  initLayers(doc);
   $('#docTitle').textContent = meta.name;
   setSurfaceUi(meta);
   showScreen('editor');
   const host = $('#hwpHost');
   host.hidden = false;
   host.innerHTML = '<div class="hwp-root"></div>';
+  host.appendChild($('#searchBar')); // 찾기 막대는 한글 화면 위에
   $('#hwpBar').hidden = false;
+  fillHwpFonts();
   updateGlassInset();
   const { HwpSession } = await import('./hwp.js');
-  const h = { session: null, meta, dirty: false, saving: null, error: null, timer: 0 };
+  const { HwpInk } = await import('./hwp-ink.js');
+  const h = { session: null, ink: null, meta, dirty: false, saving: null, error: null, timer: 0 };
   hwp = h;
   try {
     h.session = await HwpSession.open(host.firstChild, bytes, {
       onChange: () => hwpChanged(h),
+      onState: () => { if (hwp === h) renderHwpBarSoon(); },
+      onShortcut: (cmd, check) => hwpShortcut(cmd, check),
       onError: (e) => console.error('[hwp]', e),
     });
   } catch (e) {
     hwp = null;
+    $('#viewport').appendChild($('#searchBar'));
     host.hidden = true; host.innerHTML = '';
     $('#hwpBar').hidden = true;
     throw Object.assign(new Error(`한글 문서를 열 수 없습니다: ${e?.message || e} (암호가 걸렸거나 아직 지원하지 않는 구조일 수 있습니다)`), { friendly: true });
   }
   if (hwp !== h) { h.session.dispose(); return; } // 여는 사이 다른 문서로 바뀜
-  h.session.onScale = () => updateZoomLabel();
+  h.ink = new HwpInk(host.firstChild, h.session, doc, { getPen: (mode) => settings.get(mode === 'hl' ? 'hl' : 'pen') });
+  h.session.onScale = () => { updateZoomLabel(); h.ink?.redraw(); };
   if (meta.view?.hwpScale) h.session.setScale(meta.view.hwpScale);
+  if (fresh) { h.dirty = true; await saveHwp(h); delete meta.source.fresh; store.patchDoc(meta.id, { source: meta.source }).catch(() => {}); }
   renderSaveState();
   updateHistoryButtons();
   updateZoomLabel();
+  renderHwpBar();
   store.kvSet('lastDoc', meta.id).catch(() => {});
   store.patchDoc(meta.id, { opened: Date.now() }).catch(() => {});
+}
+
+/** 새 빈 한글 문서 노트 (엔진이 처음 열 때 만들고 바로 저장) */
+async function createHwpDoc(name, format) {
+  const t = Date.now(), ext = format === 'hwpx' ? 'hwpx' : 'hwp';
+  const meta = { id: uid('d'), name, kind: 'hwp', noteType: 'typing', created: t, updated: t, opened: t, thumb: null, view: null, folder: curFolder,
+    source: { format, name: `${name}.${ext}`, size: 0, imported: t, unchanged: false, fresh: true, created: true } };
+  await store.addSurfaceDoc(meta);
+  store.requestPersist();
+  return meta.id;
 }
 
 function hwpChanged(h) {
@@ -825,7 +846,9 @@ async function closeHwp() {
       await store.patchDoc(h.meta.id, { thumb, view: { hwpScale: h.session?.scale || 1 } });
     }
   } catch { /* 표지는 없어도 됨 */ }
+  h.ink?.dispose();
   await h.session?.dispose();
+  $('#viewport').appendChild($('#searchBar'));
   $('#hwpHost').hidden = true;
   $('#hwpHost').innerHTML = '';
   $('#hwpBar').hidden = true;
@@ -854,44 +877,241 @@ async function saveHwpFile() {
   } finally { busy(null); }
 }
 
-let hwpLastFmt = null;
+// ── 한글 도구 모음 ──
+const HWP_FONTS = ['함초롬바탕', '함초롬돋움', '맑은 고딕', '바탕', '돋움', '굴림', '궁서', '나눔고딕', '나눔명조', '휴먼명조', 'HY헤드라인M', 'Arial', 'Times New Roman'];
+function fillHwpFonts() {
+  const sel = $('#hbFont');
+  if (sel.options.length) return;
+  sel.innerHTML = '<option value="">글꼴</option>' + HWP_FONTS.map((f) => `<option>${escapeHtml(f)}</option>`).join('');
+}
+let hwpBarRaf = 0;
+function renderHwpBarSoon() { if (!hwpBarRaf) hwpBarRaf = requestAnimationFrame(() => { hwpBarRaf = 0; renderHwpBar(); updateHistoryButtons(); }); }
+/** 지금 선택·커서의 서식을 버튼에 (굵게 켜짐, 글꼴·크기, 정렬) */
+function renderHwpBar() {
+  if (!hwp?.session) return;
+  const f = hwp.session.formatting();
+  for (const k of ['bold', 'italic', 'underline', 'strike']) $(`#hwpBar [data-hb=${k}]`).classList.toggle('on', !!f[k]);
+  for (const k of ['left', 'center', 'right', 'justify']) $(`#hwpBar [data-hb=${k}]`).classList.toggle('on', f.align === k);
+  const size = $('#hbSize'), font = $('#hbFont');
+  if (document.activeElement !== size) {
+    const v = f.size ? String(Math.round(f.size * 10) / 10) : '';
+    if (v && ![...size.options].some((o) => o.value === v || o.text === v)) size.add(new Option(v, v));
+    size.value = v;
+  }
+  if (document.activeElement !== font) {
+    if (f.font && ![...font.options].some((o) => o.text === f.font)) font.add(new Option(f.font, f.font));
+    font.value = f.font || '';
+  }
+  for (const m of ['pen', 'hl', 'eraser']) $(`#hwpBar [data-hb=ink-${m}]`).classList.toggle('on', hwp.ink?.mode === m);
+}
+
 async function hwpFormat(kind, value) {
   if (!hwp?.session) return;
   const why = kind === 'align' ? await hwp.session.align(value) : await hwp.session.setFormat(kind, value);
-  if (why) toast(why, { ms: 2200 });
+  if (why) toast(why, { ms: 2500 });
+  renderHwpBar();
   hwp?.session.focus();
 }
-$('#hwpBar').addEventListener('pointerdown', (e) => { if (e.target.closest('button')) e.preventDefault(); }); // 누를 때 글 선택이 풀리지 않게
-$('#hwpBar').addEventListener('click', (e) => {
-  const b = e.target.closest('button[data-hb]');
-  if (!b || !hwp) return;
-  const a = b.dataset.hb;
-  if (a === 'undo') { hwp.session.undo(); setTimeout(updateHistoryButtons, 300); }
-  else if (a === 'redo') { hwp.session.redo(); setTimeout(updateHistoryButtons, 300); }
-  else if (a === 'bold' || a === 'italic' || a === 'underline' || a === 'strike') {
-    // 엔진이 지금 서식을 알려 주지 않으므로: 같은 선택에 같은 버튼을 다시 누르면 끄기
-    const sel = hwp.session.selection(), key = sel && `${a}|${sel.owner}|${sel.paragraph}|${sel.startUnit}|${sel.endUnit}`;
-    const on = !(hwpLastFmt === key);
-    hwpLastFmt = on ? key : null;
-    hwpFormat(a, on);
-  }
+async function hwpDo(promise, okMsg) {
+  const why = await promise;
+  if (why) toast(why, { ms: 3200 }); else if (okMsg) toast(okMsg, { ms: 1500 });
+  hwp?.session.focus();
+  return !why;
+}
+function hwpInkMode(mode) {
+  if (!hwp?.ink) return;
+  hwp.ink.setMode(hwp.ink.mode === mode ? null : mode);
+  if (hwp.ink.mode) toast(hwp.ink.mode === 'eraser' ? '필기 지우개: 지울 획을 문지르세요 · 다시 누르면 글쓰기로' : '펜 필기: 손가락은 넘기기 · 다시 누르면 글쓰기로', { ms: 2500 });
+  renderHwpBar();
+  updateHistoryButtons();
+}
+async function hwpAction(a) {
+  const s = hwp?.session;
+  if (!s) return;
+  if (a === 'undo') doUndo();
+  else if (a === 'redo') doRedo();
+  else if (a === 'bold' || a === 'italic' || a === 'underline' || a === 'strike') hwpFormat(a, !s.formatting()[a]);
   else if (['left', 'center', 'right', 'justify'].includes(a)) hwpFormat('align', a);
+  else if (a === 'table') {
+    const dlg = $('#hwpTableDlg');
+    dlg.showModal();
+    if (await dialogResult(dlg) !== 'ok') return;
+    await hwpDo(s.insertTable(clamp(+$('#htRows').value || 3, 1, 200), clamp(+$('#htCols').value || 3, 1, 60)), '표를 넣었습니다');
+  }
+  else if (a === 'rowAfter') hwpDo(s.tableGrid('insert-row'));
+  else if (a === 'colAfter') hwpDo(s.tableGrid('insert-column'));
+  else if (a === 'rowDel') hwpDo(s.tableGrid('delete-row'));
+  else if (a === 'colDel') hwpDo(s.tableGrid('delete-column'));
+  else if (a === 'merge') hwpDo(s.mergeCells(), '셀을 합쳤습니다');
+  else if (a === 'split') {
+    const dlg = $('#hwpSplitDlg');
+    dlg.showModal();
+    if (await dialogResult(dlg) !== 'ok') return;
+    await hwpDo(s.splitCell(clamp(+$('#hsRows').value || 1, 1, 50), clamp(+$('#hsCols').value || 2, 1, 50)), '셀을 나눴습니다');
+  }
+  else if (a === 'image') $('#hwpImageInput').click();
+  else if (a === 'page') hwpPageSetup();
+  else if (a === 'find') openSearch(true);
+  else if (a === 'ink-pen') hwpInkMode('pen');
+  else if (a === 'ink-hl') hwpInkMode('hl');
+  else if (a === 'ink-eraser') hwpInkMode('eraser');
   else if (a === 'save') saveHwpFile();
+  else if (a === 'pdf') exportHwpPdf();
+  else if (a === 'print') printHwp();
   else if (a === 'info') showHwpInfo();
-});
-$('#hbSize').addEventListener('change', (e) => { const v = parseFloat(e.target.value); e.target.value = ''; if (v) hwpFormat('size', v); });
+}
+function dialogResult(dlg) { return new Promise((res) => dlg.addEventListener('close', () => res(dlg.returnValue), { once: true })); }
+
+$('#hwpBar').addEventListener('pointerdown', (e) => { if (e.target.closest('button')) e.preventDefault(); }); // 누를 때 글 선택이 풀리지 않게
+$('#hwpBar').addEventListener('click', (e) => { const b = e.target.closest('button[data-hb]'); if (b && hwp) hwpAction(b.dataset.hb); });
+$('#hbSize').addEventListener('change', (e) => { const v = parseFloat(e.target.value); if (v) hwpFormat('size', v); });
+$('#hbFont').addEventListener('change', (e) => { if (e.target.value) hwpFormat('font', e.target.value); });
 $('#hbColor').addEventListener('change', (e) => hwpFormat('color', e.target.value));
+$('#hwpImageInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f || !hwp?.session) return;
+  try {
+    let bytes = new Uint8Array(await f.arrayBuffer());
+    const bmp = await createImageBitmap(f);
+    const w = bmp.width, hgt = bmp.height;
+    if (!/png|jpe?g/i.test(f.type)) { // 다른 형식은 PNG 로
+      const c = document.createElement('canvas'); c.width = w; c.height = hgt; c.getContext('2d').drawImage(bmp, 0, 0);
+      bytes = new Uint8Array(await (await new Promise((r) => c.toBlob(r, 'image/png'))).arrayBuffer());
+    }
+    bmp.close?.();
+    await hwpDo(hwp.session.insertImage(bytes, w, hgt), '그림을 넣었습니다');
+  } catch (err) { toast('그림을 읽지 못했습니다: ' + (err?.message || err), { error: true }); }
+});
+
+/** 엔진 단축키 → 앱 동작. check=true 면 할 수 있는지만 */
+function hwpShortcut(cmd, check) {
+  const map = { bold: 'bold', italic: 'italic', underline: 'underline', 'align-left': 'left', 'align-center': 'center', 'align-right': 'right', 'align-justify': 'justify', 'insert-table': 'table', find: 'find', replace: 'find', save: 'save', undo: 'undo', redo: 'redo' };
+  const special = { copy: 1, cut: 1, paste: 1 };
+  if (check) return !!(map[cmd] || special[cmd]);
+  if (cmd === 'copy' || cmd === 'cut') { hwp?.session.copy(cmd === 'cut').then((why) => why && toast(why, { ms: 1800 })); return; }
+  if (cmd === 'paste') { hwp?.session.surface.focusForPaste?.(); return; }
+  if (cmd === 'replace') { openSearch(true); return; }
+  if (map[cmd]) hwpAction(map[cmd]);
+}
+
+async function hwpPageSetup() {
+  const s = hwp?.session;
+  if (!s) return;
+  let r;
+  try { r = await s.pageSettings(); } catch (e) { r = { error: e?.message || String(e) }; }
+  if (r.error) { toast('쪽 설정을 읽지 못했습니다: ' + r.error, { error: true, ms: 4000 }); return; }
+  const v = r.values, m = v.margin;
+  $('#hpW').value = v.width; $('#hpH').value = v.height; $('#hpOrient').value = v.orientation || 'widely';
+  $('#hpT').value = m.top ?? 20; $('#hpB').value = m.bottom ?? 15; $('#hpL').value = m.left ?? 30; $('#hpR').value = m.right ?? 30; $('#hpHd').value = m.header ?? 15; $('#hpFt').value = m.footer ?? 15;
+  const key = `${v.width}x${v.height}`;
+  $('#hpPaper').value = [...$('#hpPaper').options].some((o) => o.value === key) ? key : '';
+  $('#hpScope').options[1].disabled = r.sections < 2;
+  const dlg = $('#hwpPageDlg');
+  dlg.showModal();
+  if (await dialogResult(dlg) !== 'ok') return;
+  const num = (id, d) => { const x = parseFloat($(id).value); return Number.isFinite(x) && x >= 0 ? x : d; };
+  const values = { orientation: $('#hpOrient').value, gutter_type: v.gutter_type, width: num('#hpW', v.width), height: num('#hpH', v.height),
+    margin: { ...m, top: num('#hpT', 20), bottom: num('#hpB', 15), left: num('#hpL', 30), right: num('#hpR', 30), header: num('#hpHd', 15), footer: num('#hpFt', 15), gutter: m.gutter ?? 0 } };
+  s.reloaded = false;
+  const ok = await hwpDo(s.setPageSettings(r.read, values, $('#hpScope').value), '쪽 설정을 바꿨습니다');
+  if (ok && s.reloaded) toast('쪽 설정을 바꿨습니다 · 새로 넣은 표·그림을 정리하려고 문서를 다시 열어서, 그 전 실행 취소 기록은 비워졌습니다', { ms: 4500 });
+  updateHistoryButtons();
+}
+$('#hpPaper').addEventListener('change', (e) => { const [w, hh] = e.target.value.split('x').map(Number); if (w) { const land = $('#hpOrient').value === 'narrowly'; $('#hpW').value = land ? hh : w; $('#hpH').value = land ? w : hh; } });
+
+/** 쪽 그림(엔진 인쇄 이미지) + 필기 → 쪽마다 캔버스 */
+async function hwpPageImages(scale = 2) {
+  const s = hwp.session;
+  const job = await s.printPages(scale);
+  const pages = job.pages;
+  const first = pages[0];
+  const boxes = hwp.ink.pageBoxes(pages.length, first.widthCssPx, first.heightCssPx);
+  const out = [];
+  for (let k = 0; k < pages.length; k++) {
+    const p = pages[k];
+    const bmp = await createImageBitmap(p.png);
+    const c = document.createElement('canvas');
+    c.width = p.pixelWidth; c.height = p.pixelHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close?.();
+    const box = boxes[k], items = hwp.ink.itemsOnPage(box);
+    if (items.length) {
+      const k2 = c.width / p.widthCssPx;
+      ctx.setTransform(k2, 0, 0, k2, -box.x * k2, -box.y * k2);
+      ctx.globalCompositeOperation = 'multiply';
+      for (const it of items) if (isHighlighter(it)) drawItem(ctx, it, { print: true });
+      ctx.globalCompositeOperation = 'source-over';
+      for (const it of items) if (!isHighlighter(it)) drawItem(ctx, it, { print: true });
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    out.push({ canvas: c, wPt: p.widthCssPx * 0.75, hPt: p.heightCssPx * 0.75 });
+  }
+  return out;
+}
+async function exportHwpPdf() {
+  if (!hwp?.session) return;
+  busy('PDF 만드는 중…');
+  try {
+    const imgs = await hwpPageImages(2);
+    const { PDFDocument } = await import('../vendor/pdf-lib/pdf-lib.esm.min.js');
+    const pdf = await PDFDocument.create();
+    for (const im of imgs) {
+      const jpg = await new Promise((r) => im.canvas.toBlob(r, 'image/jpeg', 0.92));
+      const emb = await pdf.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
+      const pg = pdf.addPage([im.wPt, im.hPt]);
+      pg.drawImage(emb, { x: 0, y: 0, width: im.wPt, height: im.hPt });
+    }
+    const bytes = await pdf.save();
+    downloadBlob(new Blob([bytes], { type: 'application/pdf' }), `${hwp.meta.name}.pdf`);
+    toast(`PDF ${imgs.length}쪽을 내보냈습니다 (필기 포함)`, { ms: 2500 });
+  } catch (e) {
+    console.error(e);
+    toast('PDF 를 만들지 못했습니다: ' + (e?.message || e), { error: true, ms: 5000 });
+  } finally { busy(null); }
+}
+async function printHwp() {
+  if (!hwp?.session) return;
+  busy('인쇄 준비 중…');
+  try {
+    const imgs = await hwpPageImages(2);
+    let root = $('#printRoot');
+    if (!root) { root = document.createElement('div'); root.id = 'printRoot'; document.body.appendChild(root); }
+    root.innerHTML = `<style>@page { size: ${imgs[0].wPt}pt ${imgs[0].hPt}pt; margin: 0 }</style>`;
+    for (const im of imgs) {
+      const pg = document.createElement('div');
+      pg.className = 'print-page';
+      pg.style.cssText = `width:${im.wPt}pt;height:${im.hPt}pt`;
+      const img = document.createElement('img');
+      img.src = im.canvas.toDataURL('image/png');
+      img.style.cssText = 'width:100%;height:100%;display:block';
+      pg.appendChild(img);
+      root.appendChild(pg);
+    }
+    const done = () => { root.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    busy(null);
+    await new Promise((r) => setTimeout(r, 50));
+    window.print();
+  } catch (e) {
+    console.error(e);
+    toast('인쇄를 준비하지 못했습니다: ' + (e?.message || e), { error: true, ms: 5000 });
+  } finally { busy(null); }
+}
 
 function showHwpInfo() {
   const src = hwp?.meta.source || {};
   alert([
-    `원본: ${src.name || '-'} (${src.format === 'hwpx' ? 'HWPX' : 'HWP'}, ${Math.round((src.size || 0) / 1024)}KB)`,
-    src.unchanged ? '아직 고친 곳 없음 → 저장하면 원본 그대로' : '고친 내용이 있음 → "한글 저장"은 새 이름으로 내려받음 (원본은 보관)',
+    src.created ? `FlexNote 에서 새로 만든 ${src.format === 'hwpx' ? 'HWPX' : 'HWP'} 문서` : `원본: ${src.name || '-'} (${src.format === 'hwpx' ? 'HWPX' : 'HWP'}, ${Math.round((src.size || 0) / 1024)}KB)`,
+    src.created ? '' : src.unchanged ? '아직 고친 곳 없음 → 저장하면 원본 그대로' : '고친 내용이 있음 → "한글 저장"은 새 이름으로 내려받음 (원본은 보관)',
     '',
     '한글 형식 그대로 편집합니다 (다른 형식으로 바꾸지 않음).',
-    '지금 되는 것: 글 입력·지우기, 굵게·기울임·밑줄·취소선·글자 크기·글자색, 문단 정렬, 실행 취소.',
-    '아직 안 되는 것: 이 문서 위 펜 필기, 글자 찾기, PDF 내보내기. 줄 배치 정보는 한글에서 열 때 다시 맞춰집니다.',
-  ].join('\n'));
+    '글자: 글꼴·크기·굵게·기울임·밑줄·취소선·글자색 (선택한 글자, 또는 커서에서 다음에 칠 글자)',
+    '문단: 정렬 / 표: 넣기·행·열 추가·삭제·셀 합치기(HWPX)·나누기 / 그림 넣기(본문) / 쪽 설정 / 찾기·바꾸기 / 복사·붙여넣기',
+    '펜·형광펜 필기는 노트에 따로 보관 (한글 파일은 그대로), PDF·인쇄에 함께 나옵니다.',
+    '알아 둘 점: 줄 배치 정보(조판 캐시)는 한글이 열 때 다시 맞춥니다. 엔진이 지원하지 않는 개체·위치는 이유를 알려 줍니다.',
+  ].filter((x, i) => x || i === 2).join('\n'));
 }
 
 const saveTypingPages = debounce(() => { if (typing) store.patchDoc(typing.meta.id, { pageCount: typing.meta.pageCount }).catch(() => {}); }, 1000);
@@ -1355,6 +1575,11 @@ async function createSurfaceDoc(kind, name, bg, size) {
 $('#newNoteDlg').addEventListener('close', async () => {
   if ($('#newNoteDlg').returnValue !== 'ok') return;
   const name = $('#nnName').value.trim() || '새 노트';
+  if (nnType === 'typing' && $('#nnTFormat').value !== 'flex') {
+    try { await openDoc(await createHwpDoc(name, $('#nnTFormat').value)); }
+    catch (e) { console.error(e); toast('노트를 만들 수 없습니다: ' + (e?.friendly ? e.message : store.describeError(e)), { error: true }); }
+    return;
+  }
   if (nnType === 'typing') {
     const page = { ...DEFAULT_PAGE, size: $('#nnTSize').value, orient: $('#nnTOrient').value, margin: { ...MARGINS[$('#nnTMargin').value] }, font: $('#nnTFont').value, fontSize: +$('#nnTFontSize').value || DEFAULT_PAGE.fontSize };
     try { await openDoc(await createTypingDoc(name, page)); }
@@ -1684,7 +1909,7 @@ $('#gotoPage').addEventListener('change', (e) => {
   if (n >= 1) { viewer.goToPage(n - 1); thumbs.setCurrent(n - 1, true); }
   e.target.value = '';
 });
-$('#btnExport').addEventListener('click', () => exportPdf());
+$('#btnExport').addEventListener('click', () => (hwp ? exportHwpPdf() : exportPdf()));
 $('#btnSettings').addEventListener('click', () => openSettings());
 $('#btnLibSettings').addEventListener('click', () => openSettings());
 $('#btnDebug').addEventListener('click', () => { dbg.enable(!dbg.on); });
@@ -3014,9 +3239,12 @@ let searchJob = 0;
 let searchHits = []; // [{page, rects}] 문서 순서
 let searchCur = -1;
 
-function openSearch() {
+function openSearch(replace = false) {
   if (!state.doc) return;
   const bar = $('#searchBar'), inp = $('#searchInput');
+  $('#searchReplace').hidden = !hwp; // 바꾸기는 한글 문서에서
+  inp.placeholder = hwp ? '한글 문서에서 찾기' : 'PDF 글자·직접 쓴 글 찾기';
+  if (hwp && replace && inp.value) setTimeout(() => $('#replaceInput').focus(), 0);
   commitTextEdit();
   bar.hidden = false;
   $('#btnSearch').classList.add('on');
@@ -3048,6 +3276,7 @@ async function pageTextIndex(i) {
 
 /** 모든 페이지를 차례로 찾는다 (긴 PDF 도 화면이 멈추지 않게 나눠서, 찾는 중에도 개수가 늘어남) */
 async function runSearch({ keepPlace = false } = {}) {
+  if (hwp) return hwpRunSearch();
   const job = ++searchJob, d = state.doc;
   const q = prepQuery($('#searchInput').value);
   const prevCur = searchHits[searchCur];
@@ -3106,6 +3335,7 @@ function showSearchHit(move) {
   }
 }
 function stepSearch(dir) {
+  if (hwp) { hwpFind(dir > 0 ? 'forward' : 'backward'); return; }
   if (!searchHits.length) { runSearch(); return; }
   searchCur = (searchCur + dir + searchHits.length) % searchHits.length;
   showSearchHit(true);
@@ -3113,6 +3343,47 @@ function stepSearch(dir) {
 }
 
 $('#btnSearch').addEventListener('click', () => ($('#searchBar').hidden ? openSearch() : closeSearch()));
+
+// 한글 문서 찾기·바꾸기: 엔진의 문서 전체 색인으로 (찾으면 문서에서 그 글자를 선택)
+let hwpSearchJob = 0;
+async function hwpRunSearch() {
+  const job = ++hwpSearchJob, q = $('#searchInput').value, count = $('#searchCount');
+  count.classList.remove('none');
+  if (!q || !hwp?.session) { count.textContent = ''; return; }
+  try {
+    const n = await hwp.session.count(q);
+    if (job !== hwpSearchJob) return;
+    count.textContent = n ? `${n}개` : '없음';
+    count.classList.toggle('none', !n);
+  } catch (e) { console.warn('[hwp search]', e); count.textContent = ''; }
+}
+async function hwpFind(dir) {
+  const q = $('#searchInput').value;
+  if (!q || !hwp?.session) return;
+  try {
+    const r = await hwp.session.find(q, dir);
+    if (r !== 'selected') { $('#searchCount').textContent = '없음'; $('#searchCount').classList.add('none'); }
+  } catch (e) { console.warn('[hwp find]', e); toast('찾지 못했습니다: ' + (e?.message || e), { ms: 2500 }); }
+}
+$('#replaceOne').addEventListener('click', async () => {
+  const q = $('#searchInput').value, r = $('#replaceInput').value;
+  if (!q || !hwp?.session) return;
+  const done = await hwp.session.replaceSelection(q, r).catch(() => false);
+  if (!done) { await hwpFind('forward'); return; } // 먼저 찾아서 선택
+  await hwpFind('forward');
+  hwpRunSearch();
+});
+$('#replaceAll').addEventListener('click', async () => {
+  const q = $('#searchInput').value, r = $('#replaceInput').value;
+  if (!q || !hwp?.session) return;
+  const n = await hwp.session.count(q).catch(() => 0);
+  const res = await hwp.session.replaceAll(q, r).catch((e) => e?.message || String(e));
+  if (res === 'done') toast(`${n}곳을 바꿨습니다`, { ms: 2200 });
+  else if (res === 'none') toast('바꿀 곳이 없습니다', { ms: 1800 });
+  else toast(res, { error: true, ms: 3500 });
+  hwpRunSearch();
+});
+$('#replaceInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); $('#replaceOne').click(); } else if (e.key === 'Escape') closeSearch(); });
 $('#searchClose').addEventListener('click', closeSearch);
 $('#searchNext').addEventListener('click', () => stepSearch(1));
 $('#searchPrev').addEventListener('click', () => stepSearch(-1));
@@ -3274,7 +3545,7 @@ lnDlg.addEventListener('close', () => {
 
 function doUndo() {
   if (!state.doc) return;
-  if (hwp) { hwp.session?.undo(); setTimeout(updateHistoryButtons, 300); return; }
+  if (hwp && !hwp.ink?.mode) { hwp.session?.undo(); setTimeout(updateHistoryButtons, 300); return; } // 필기 중이면 아래(노트 필기) 실행 취소
   if (typing && settings.get('tool') === 'type') { typing.ed.editor.chain().focus().undo().run(); return; }
   commitTextEdit();
   const page = state.doc.undo();
@@ -3284,7 +3555,7 @@ function doUndo() {
 }
 function doRedo() {
   if (!state.doc) return;
-  if (hwp) { hwp.session?.redo(); setTimeout(updateHistoryButtons, 300); return; }
+  if (hwp && !hwp.ink?.mode) { hwp.session?.redo(); setTimeout(updateHistoryButtons, 300); return; }
   if (typing && settings.get('tool') === 'type') { typing.ed.editor.chain().focus().redo().run(); return; }
   const page = state.doc.redo();
   if (page == null) { toast('다시 실행할 항목이 없습니다', { ms: 1200 }); return; }
@@ -3294,7 +3565,8 @@ function doRedo() {
 function updateHistoryButtons() {
   const d = state.doc;
   if (hwp) {
-    const u = !hwp.session?.canUndo(), r = !hwp.session?.canRedo();
+    const inkMode = !!hwp.ink?.mode;
+    const u = inkMode ? !d?.canUndo() : !hwp.session?.canUndo(), r = inkMode ? !d?.canRedo() : !hwp.session?.canRedo();
     $('#btnUndo').disabled = u; $('#btnRedo').disabled = r;
     $('#hwpBar [data-hb=undo]').disabled = u; $('#hwpBar [data-hb=redo]').disabled = r;
     return;
@@ -3333,7 +3605,7 @@ $('#btnRedo').addEventListener('click', doRedo);
 document.addEventListener('keydown', (e) => {
   if (state.screen !== 'editor') return;
   // Ctrl+F: 브라우저 찾기 대신 앱 검색 (PDF 글자는 그림으로 그려져 브라우저가 못 찾음)
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && e.target.id !== 'textEditor') { e.preventDefault(); if (hwp) toast('한글 문서에서 글자 찾기는 아직 지원하지 않습니다', { ms: 2200 }); else openSearch(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && e.target.id !== 'textEditor') { e.preventDefault(); openSearch(!!hwp); return; }
   if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) {
     if (e.target.id === 'textEditor' && e.key === 'Escape') { e.preventDefault(); commitTextEdit(); }
     return;

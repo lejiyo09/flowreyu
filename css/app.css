@@ -669,8 +669,8 @@ input[type=range] { accent-color: var(--accent); }
 .hwp-host { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 5; background: #e8edf2; }
 .hwp-host[hidden] { display: none; }
 .hwp-root { position: absolute; inset: 0; }
-#editor.hwp-mode #viewport, #editor.hwp-mode #toolbar, #editor.hwp-mode #btnLayers, #editor.hwp-mode #btnExport,
-#editor.hwp-mode #btnRec, #editor.hwp-mode #btnAi, #editor.hwp-mode #pageInd, #editor.hwp-mode #btnSearch { display: none !important; }
+#editor.hwp-mode #viewport, #editor.hwp-mode #toolbar, #editor.hwp-mode #btnLayers,
+#editor.hwp-mode #btnRec, #editor.hwp-mode #btnAi, #editor.hwp-mode #pageInd { display: none !important; }
 .hb-badge { font-size: 11px; font-weight: 700; color: #fff; background: #1f6fd6; border-radius: 5px; padding: 2px 6px; margin-right: 4px; flex: none; }
 .fmt-bar button:disabled { opacity: .35; }
 
@@ -688,3 +688,12 @@ input[type=range] { accent-color: var(--accent); }
 .lib-tabs .tab-label { align-self: center; font-size: 12px; color: var(--muted); padding: 0 6px 0 4px; flex: none; }
 :root.glass .lib-tabs { background: var(--glass-bg-strong); border-color: var(--glass-line); -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%); }
 :root.glass .lib-tabs .tab { background: transparent; border-color: var(--glass-line); }
+
+/* 한글 문서 위 필기 층: 평소엔 엔진이 입력을 받고(통과), 펜·지우개 모드에서만 받음 */
+.hwp-ink { position: absolute; left: 0; top: 0; pointer-events: none; z-index: 3; touch-action: none; }
+.hwp-ink.active { pointer-events: auto; }
+.hb-table { display: inline-flex; gap: 2px; flex: none; }
+.hwp-host .search-bar { z-index: 6; flex-wrap: wrap; }
+.search-replace { display: flex; gap: 4px; align-items: center; flex-basis: 100%; margin-top: 4px; }
+.search-replace[hidden] { display: none; }
+.search-replace input { flex: 1; min-width: 80px; }

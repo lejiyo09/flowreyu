@@ -50,7 +50,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await openFile(hwpFile);
   check('HWP opens as a 한글 document (kind hwp, original format kept)', await page.evaluate(() => __flexnote.state.doc.meta.kind === 'hwp' && __flexnote.state.doc.meta.source.format === 'hwp5' && __flexnote.state.doc.meta.noteType === 'typing'));
   check('document text is shown', (await pageText()).includes('한글 시험 문서'), JSON.stringify(await pageText()));
-  check('hwp bar shown; pen toolbar / PDF-only buttons hidden', await page.locator('#hwpBar').isVisible() && !(await page.locator('#toolbar').isVisible()) && !(await page.locator('#btnExport').isVisible()) && await page.locator('#hwpHost canvas').count() > 0);
+  check('hwp bar shown; pen toolbar / PDF-page buttons hidden', await page.locator('#hwpBar').isVisible() && !(await page.locator('#toolbar').isVisible()) && !(await page.locator('#pageInd').isVisible()) && await page.locator('#hwpHost canvas').count() > 0);
 
   // ── 고치지 않고 저장 → 원본 그대로 ──
   let [dl] = await Promise.all([page.waitForEvent('download'), page.click('#hwpBar [data-hb=save]')]);

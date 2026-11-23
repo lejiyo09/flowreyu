@@ -23,7 +23,7 @@ export class HwpSession {
    * root 안에 문서를 그리고 편집할 수 있게 연다.
    * onChange(): 내용이 바뀔 때 (실행 취소 포함)
    */
-  static async open(root, bytes, { onChange, onError, onShortcut } = {}) {
+  static async open(root, bytes, { onChange, onError, onShortcut, onState } = {}) {
     const E = await loadEngine();
     const editor = E.createEditor({
       runtimeFactory: E.createWorkerRuntimeFactory() /* 주소를 넘기면 엔진이 '사용자 지정'으로 보고 찾기·서식 읽기 등을 끔 → 모듈 옆 worker.js·hwpjs.wasm 기본값 */,
@@ -37,6 +37,10 @@ export class HwpSession {
       const st = typeof bytes === 'string' ? await editor.createDocument({ format, editable: true }) : await editor.load(bytes, { format, editable: true });
       const s = new HwpSession(editor, surface, format, st.operationRevision);
       s.detachTouch = touchNavigation(root, s);
+      // 엔진의 글 입력 칸에도 Grammarly 등 확장이 붙지 않게 (캔버스 위 엉뚱한 자리에 밑줄이 뜸)
+      for (const ta of root.querySelectorAll('textarea')) { ta.setAttribute('data-gramm', 'false'); ta.setAttribute('data-gramm_editor', 'false'); ta.setAttribute('data-enable-grammarly', 'false'); ta.spellcheck = false; }
+      // 한글처럼 투명 표 선(테두리 없는 표)을 편집 화면에 점선으로 (인쇄·저장에는 나오지 않음)
+      try { surface.setDisplayOptions({ paragraphMarks: false, formattingMarks: false, showTableGrid: true, showTransparentTableLines: true }); } catch { /* */ }
       // 한글 프로그램과 같은 단축키 (Ctrl+B·I·U, Alt+Shift+B, Ctrl+Shift+L/C/R/M 정렬, Ctrl+F·H, Ctrl+S …) → 앱이 실행
       if (onShortcut && E.createKeyboardShortcuts) {
         const mac = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -51,6 +55,7 @@ export class HwpSession {
       }
       editor.registerStateListener((state) => {
         if (state.operationRevision !== s.rev) { s.rev = state.operationRevision; onChange?.(); }
+        onState?.(state); // 선택·커서 이동 포함 (도구 모음 표시)
       });
       return s;
     } catch (e) {
@@ -188,8 +193,9 @@ export class HwpSession {
   async count(query) {
     if (!query) return 0;
     const index = await this.editor.getDocumentTextSnapshot({ token: this.state().token });
-    if (H.documentTextMatches) return H.documentTextMatches(index, query).length;
-    return 0;
+    let n = 0;
+    for (const _ of H.documentTextMatches(index, query)) n++; // 생성기
+    return n;
   }
   /** 지금 선택이 query 와 같으면 replacement 로 바꿈 → 바꿨으면 true */
   async replaceSelection(query, replacement) {
@@ -241,7 +247,7 @@ export class HwpSession {
       const index = (action.endsWith('row') ? c.row : c.column) + (action.startsWith('insert') ? 1 : 0);
       return this.run(H.EDIT_CREATED_TABLE_GRID_COMMAND, { section: gen.section, identity: c.identity, action, index });
     }
-    return '먼저 표의 칸을 누르세요';
+    return '표의 칸을 누르세요 (행·열을 바꾼 뒤에는 칸을 다시 눌러야 합니다)';
   }
   /** 셀 합치기: 칸 여러 개를 블록으로 선택한 뒤 (F5 또는 끌기) */
   async mergeCells() {
@@ -291,11 +297,42 @@ export class HwpSession {
     const mm = (v) => (v == null ? null : Math.round(v * 25.4 / 7200 * 10) / 10);
     return { read, values: { orientation: s.orientation, gutter_type: s.gutter_type || 'left_only', width: mm(s.width), height: mm(s.height), margin: Object.fromEntries(Object.entries(s.margin || {}).map(([k, v]) => [k, mm(v)])) }, sections: read.sections.length };
   }
-  /** 쪽 설정 바꾸기 (mm). scope 'section'|'document' */
+  /**
+   * 쪽 설정 바꾸기 (mm). scope 'section'|'document'.
+   * 이번에 새로 넣은 표·그림이 있으면 엔진이 거절(PendingObjects) → 저장해 다시 연 뒤 적용 (실행 취소 기록은 비워짐)
+   */
   async setPageSettings(read, v, scope = 'document') {
     const u = (mm) => Math.round(mm * 7200 / 25.4);
     const values = { orientation: v.orientation, width: u(v.width), height: u(v.height), gutter_type: v.gutter_type, margin: Object.fromEntries(Object.entries(v.margin).map(([k, x]) => [k, u(x || 0)])) };
-    return this.run(H.EDIT_PAGE_SETTINGS_COMMAND, { target: read.target, scope, values });
+    const apply = async (target) => {
+      try { return await this.editor.dispatchCommand(H.EDIT_PAGE_SETTINGS_COMMAND, { target, scope, values }); } catch (e) { return { error: e?.message || String(e) }; }
+    };
+    let r = await apply(read.target);
+    if (/PendingObjects/.test(r?.error || '')) {
+      await this.reload();
+      const again = await this.editor.getPageSettings();
+      if (again.state !== 'available') return describe(again.reason);
+      r = await apply(again.target);
+      if (/^committed/.test(r?.status || '')) this.reloaded = true;
+    }
+    if (/^committed/.test(r?.status || '') || r?.status === 'known-no-op') return null;
+    return describe(r?.error || r?.status);
+  }
+  /**
+   * 인쇄용 쪽 그림. 이번에 새로 만든 표 등은 엔진이 바로 인쇄 그림으로 못 그리는 경우가 있어(PrintTablePaintIncomplete)
+   * 그때는 지금 내용을 저장해 보이지 않는 두 번째 엔진에서 열어 그린다 (편집 중인 문서·실행 취소 기록은 그대로)
+   */
+  async printPages(scale = 2) {
+    await this.settle();
+    try { return await this.surface.capturePrintPages({ scale }); }
+    catch (e) { if (!/Incomplete|Stale|Pending/i.test(e?.message || '')) throw e; }
+    const { bytes } = await this.save();
+    return screenPages(bytes, scale);
+  }
+  /** 지금 내용을 저장해 같은 편집기로 다시 열기 (엔진이 새 개체를 정리한 상태로) */
+  async reload() {
+    const { bytes } = await this.save();
+    await this.editor.load(bytes, { format: this.fileFormat, editable: true });
   }
 
   // ── 클립보드 ──
@@ -346,7 +383,8 @@ export class HwpSession {
 function describe(reason) {
   const r = String(reason || '').replace(/^(Error|RuntimeAdmissionRejected):\s*/, '');
   if (/ReadOnly/i.test(r)) return '읽기 전용 문서입니다';
-  if (/Unavailable|Unsupported/i.test(r)) return '이 위치에서는 아직 이 서식을 바꿀 수 없습니다';
+  if (/Stale/i.test(r)) return '문서가 그사이 바뀌었습니다. 다시 눌러 주세요';
+  if (/Unavailable|Unsupported/i.test(r)) return `엔진이 이 위치·문서에서는 아직 지원하지 않습니다 (${r})`;
   return r ? `적용하지 못했습니다 (${r})` : '적용하지 못했습니다';
 }
 
@@ -403,7 +441,7 @@ function touchNavigation(root, session) {
     start = null;
     if (tap) { // 탭: 같은 자리에 마우스 클릭을 보내 엔진이 커서를 놓게
       const target = document.elementFromPoint(e.clientX, e.clientY);
-      if (!target || !root.contains(target)) return;
+      if (!target || !root.contains(target) || target.classList.contains('hwp-ink')) return; // 필기 모드: 탭은 아무것도 안 함
       const o = { bubbles: true, cancelable: true, composed: true, clientX: e.clientX, clientY: e.clientY, screenX: e.screenX, screenY: e.screenY, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true, view: window };
       target.dispatchEvent(new PointerEvent('pointerdown', { ...o, buttons: 1 }));
       target.dispatchEvent(new MouseEvent('mousedown', { ...o, buttons: 1 }));
@@ -432,4 +470,49 @@ function touchNavigation(root, session) {
     root.removeEventListener('pointercancel', up, opt);
     cancelAnimationFrame(raf);
   };
+}
+
+/**
+ * 인쇄 검사기가 거절한 문서용 대안: 보이지 않는 엔진 화면에 쪽을 하나씩 띄워 그려진 그림을 복사한다.
+ * (편집용 점선·문단 부호는 끔. 화면과 같은 그림이므로 내용은 같고, 해상도는 scale 배)
+ */
+async function screenPages(bytes, scale = 2) {
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:1300px;pointer-events:none;opacity:0;z-index:-1'; // 화면 밖이면 엔진이 그리지 않음 → 투명하게 뒤에
+  document.body.appendChild(box);
+  let s;
+  const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  try {
+    s = await HwpSession.open(box, bytes);
+    try { s.surface.setDisplayOptions({ paragraphMarks: false, formattingMarks: false, showTableGrid: false, showTransparentTableLines: false }); } catch { /* */ }
+    await new Promise((r) => setTimeout(r, 400));
+    const sc = [...box.querySelectorAll('div')].find((el) => /(auto|scroll)/.test(getComputedStyle(el).overflowY));
+    const g0 = s.surface.getPageGeometry();
+    if (!sc || !g0) throw new Error('쪽 그림을 만들 수 없습니다');
+    const W = g0.paper.width, Hh = g0.paper.height;
+    const n = s.surface.getPageStatus()?.total || 1;
+    const gap = n > 1 ? Math.max(0, (sc.scrollHeight - 20 - n * Hh) / (n - 1)) : 20;
+    const pages = [];
+    for (let k = 0; k < n; k++) {
+      sc.scrollTop = 20 + k * (Hh + gap) - 10;
+      await frame(); await new Promise((r) => setTimeout(r, 150)); await frame();
+      const cv = [...box.querySelectorAll('canvas')].find((c) => c.width > 100);
+      const g = s.surface.getPageGeometry();
+      const pr = cv.getBoundingClientRect(), r = sc.getBoundingClientRect();
+      const px = cv.width / pr.width;
+      const top = 20 + k * (Hh + gap) - sc.scrollTop; // 쪽 위 (스크롤 칸 기준 CSS px)
+      const left = (g?.paperLeft ?? g0.paperLeft) - sc.scrollLeft;
+      const out = document.createElement('canvas');
+      out.width = Math.round(W * scale); out.height = Math.round(Hh * scale);
+      const ctx = out.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(cv, (r.left - pr.left + left) * px, (r.top - pr.top + top) * px, W * px, Hh * px, 0, 0, out.width, out.height);
+      const png = await new Promise((res) => out.toBlob(res, 'image/png'));
+      pages.push({ ordinal: k, section: 0, widthCssPx: W, heightCssPx: Hh, pixelWidth: out.width, pixelHeight: out.height, png });
+    }
+    return { kind: 'screen-pages', pages };
+  } finally {
+    await s?.dispose();
+    box.remove();
+  }
 }

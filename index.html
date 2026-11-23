@@ -169,19 +169,39 @@
     <button data-hb="undo" title="실행 취소 (Ctrl+Z)" disabled>↶</button>
     <button data-hb="redo" title="다시 실행 (Ctrl+Y)" disabled>↷</button>
     <span class="fb-sep"></span>
-    <select id="hbSize" title="글자 크기 (pt) — 글자를 선택한 뒤"><option value="">크기</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option></select>
-    <button data-hb="bold" title="굵게 (같은 선택에 다시 누르면 끄기)"><b>가</b></button>
-    <button data-hb="italic" title="기울임"><i>가</i></button>
-    <button data-hb="underline" title="밑줄"><u>가</u></button>
+    <select id="hbFont" title="글꼴 (글자를 선택하거나, 커서에서 다음에 칠 글자)"></select>
+    <select id="hbSize" title="글자 크기 (pt)"><option value="">크기</option><option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option><option>40</option></select>
+    <button data-hb="bold" title="굵게 (Ctrl+B · Alt+Shift+B)"><b>가</b></button>
+    <button data-hb="italic" title="기울임 (Ctrl+I)"><i>가</i></button>
+    <button data-hb="underline" title="밑줄 (Ctrl+U)"><u>가</u></button>
     <button data-hb="strike" title="취소선"><s>가</s></button>
     <label class="fb-color" title="글자색"><span class="fb-a">가</span><input type="color" id="hbColor" value="#c62828"></label>
     <span class="fb-sep"></span>
-    <button data-hb="left" title="왼쪽 정렬">⯇</button>
-    <button data-hb="center" title="가운데 정렬">≡</button>
-    <button data-hb="right" title="오른쪽 정렬">⯈</button>
-    <button data-hb="justify" title="양쪽 정렬">☰</button>
+    <button data-hb="left" title="왼쪽 정렬 (Ctrl+Shift+L)">⯇</button>
+    <button data-hb="center" title="가운데 정렬 (Ctrl+Shift+C)">≡</button>
+    <button data-hb="right" title="오른쪽 정렬 (Ctrl+Shift+R)">⯈</button>
+    <button data-hb="justify" title="양쪽 정렬 (Ctrl+Shift+M)">☰</button>
     <span class="fb-sep"></span>
-    <button data-hb="save" class="txt" title="한글 파일로 저장 (원래 형식 .hwp/.hwpx)">한글 저장</button>
+    <button data-hb="table" class="txt" title="표 넣기 (Ctrl+Alt+T)">표</button>
+    <span class="hb-table" id="hbTable">
+      <button data-hb="rowAfter" class="txt" title="아래에 행 추가 (표 칸을 누른 뒤)">+행</button>
+      <button data-hb="colAfter" class="txt" title="오른쪽에 열 추가">+열</button>
+      <button data-hb="rowDel" class="txt" title="행 지우기">−행</button>
+      <button data-hb="colDel" class="txt" title="열 지우기">−열</button>
+      <button data-hb="merge" class="txt" title="셀 합치기: 칸 여러 개를 선택한 뒤 (F5 → 방향키, 또는 끌기)">합치기</button>
+      <button data-hb="split" class="txt" title="셀 나누기">나누기</button>
+    </span>
+    <button data-hb="image" class="txt" title="그림 넣기 (본문 문단에)">그림</button>
+    <button data-hb="page" class="txt" title="쪽 설정: 용지 크기·방향·여백">쪽 설정</button>
+    <button data-hb="find" class="txt" title="찾기·바꾸기 (Ctrl+F · Ctrl+H)">찾기</button>
+    <span class="fb-sep"></span>
+    <button data-hb="ink-pen" class="txt" title="펜으로 필기 (문서 위 주석 — 한글 파일은 그대로)">✎ 펜</button>
+    <button data-hb="ink-hl" class="txt" title="형광펜 주석">형광</button>
+    <button data-hb="ink-eraser" class="txt" title="필기 지우개">지우개</button>
+    <span class="fb-sep"></span>
+    <button data-hb="save" class="txt" title="한글 파일로 저장 (원래 형식 .hwp/.hwpx, Ctrl+S)">한글 저장</button>
+    <button data-hb="pdf" class="txt" title="필기를 포함해 PDF 로 내보내기">PDF</button>
+    <button data-hb="print" class="txt" title="인쇄 (필기 포함)">인쇄</button>
     <button data-hb="info" class="txt" title="원본 파일 정보와 지원 범위">원본 정보</button>
   </div>
 
@@ -245,7 +265,7 @@
             <button data-sel="al-vdist" class="al dist" title="세로 간격 같게 (3개 이상)"><svg viewBox="0 0 20 20"><path d="M3 2h14M3 18h14" /><rect x="6" y="5" width="8" height="3" /><rect x="6" y="12" width="8" height="3" /></svg></button>
           </div>
         </div>
-        <textarea id="textEditor" class="text-editor" data-ui hidden spellcheck="false" rows="1"></textarea>
+        <textarea id="textEditor" class="text-editor" data-ui hidden spellcheck="false" rows="1" data-gramm="false" data-gramm_editor="false" data-enable-grammarly="false"></textarea>
         <div id="zoomBadge" class="zoom-badge" hidden>100%</div>
         <div id="searchBar" class="search-bar" data-ui hidden>
           <svg><use href="#i-search"/></svg>
@@ -254,6 +274,11 @@
           <button class="icon-btn sm" id="searchPrev" title="이전 (Shift+Enter)">▲</button>
           <button class="icon-btn sm" id="searchNext" title="다음 (Enter)">▼</button>
           <button class="icon-btn sm" id="searchClose" title="닫기 (Esc)"><svg><use href="#i-close"/></svg></button>
+          <div class="search-replace" id="searchReplace" hidden>
+            <input type="text" id="replaceInput" placeholder="바꿀 말" autocomplete="off" spellcheck="false">
+            <button class="btn sm" id="replaceOne" title="지금 선택한 것 바꾸고 다음 찾기">바꾸기</button>
+            <button class="btn sm" id="replaceAll" title="문서 전체 바꾸기">모두 바꾸기</button>
+          </div>
         </div>
       </div>
       <div id="viewerMsg" class="viewer-msg" hidden></div>
@@ -525,6 +550,7 @@
       </div>
       <div class="row" id="nnSizeRow"><span>크기</span><select id="nnSize"><option value="A4">A4</option><option value="Letter">Letter</option></select></div>
       <div class="row" id="nnPagesRow"><span>페이지 수</span><input type="number" id="nnPages" value="20" min="1" max="500"></div>
+      <div class="row nn-ty" hidden><span>파일 형식</span><select id="nnTFormat"><option value="flex">FlexNote 문서 (Word 로 저장 가능)</option><option value="hwp5">한글 문서 (.hwp)</option><option value="hwpx">한글 문서 (.hwpx)</option></select></div>
       <div class="row nn-ty" hidden><span>용지</span><select id="nnTSize"><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option><option value="Letter">Letter</option></select></div>
       <div class="row nn-ty" hidden><span>방향</span><select id="nnTOrient"><option value="portrait">세로</option><option value="landscape">가로</option></select></div>
       <div class="row nn-ty" hidden><span>여백</span><select id="nnTMargin"><option value="normal">보통 (위 20·아래 15·좌우 30mm)</option><option value="narrow">좁게 (12.7mm)</option><option value="wide">넓게 (25.4 · 31.7mm)</option></select></div>
@@ -649,6 +675,42 @@
 <div id="busy" class="busy" hidden><div class="busy-card"><div class="spinner"></div><span id="busyText">처리 중…</span></div></div>
 <div id="toast" class="toast" hidden></div>
 <div id="updateBar" class="update-bar" data-ui hidden><span>새 버전이 준비되었습니다</span><button class="btn sm primary">업데이트</button></div>
+<dialog id="hwpTableDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner" novalidate>
+    <header class="dlg-head"><h2>표 넣기</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+    <div class="row"><span>줄 수</span><input type="number" id="htRows" value="3" min="1" max="200"></div>
+    <div class="row"><span>칸 수</span><input type="number" id="htCols" value="3" min="1" max="60"></div>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">넣기</button></footer>
+  </form>
+</dialog>
+<dialog id="hwpSplitDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner" novalidate>
+    <header class="dlg-head"><h2>셀 나누기</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+    <div class="row"><span>줄 수</span><input type="number" id="hsRows" value="1" min="1" max="50"></div>
+    <div class="row"><span>칸 수</span><input type="number" id="hsCols" value="2" min="1" max="50"></div>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">나누기</button></footer>
+  </form>
+</dialog>
+<dialog id="hwpPageDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner" novalidate>
+    <header class="dlg-head"><h2>쪽 설정 (한글 문서)</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+    <div class="row"><span>용지</span><select id="hpPaper"><option value="">직접</option><option value="210x297">A4</option><option value="148x210">A5</option><option value="182x257">B5</option><option value="257x364">B4</option><option value="215.9x279.4">Letter</option></select></div>
+    <div class="row"><span>너비·높이 (mm)</span><input type="number" id="hpW" step="0.1" min="10" max="1000"> <input type="number" id="hpH" step="0.1" min="10" max="1000"></div>
+    <div class="row"><span>방향</span><select id="hpOrient"><option value="widely">세로</option><option value="narrowly">가로</option></select></div>
+    <div class="row"><span>위·아래 (mm)</span><input type="number" id="hpT" step="0.1" min="0"> <input type="number" id="hpB" step="0.1" min="0"></div>
+    <div class="row"><span>왼쪽·오른쪽 (mm)</span><input type="number" id="hpL" step="0.1" min="0"> <input type="number" id="hpR" step="0.1" min="0"></div>
+    <div class="row"><span>머리말·꼬리말 (mm)</span><input type="number" id="hpHd" step="0.1" min="0"> <input type="number" id="hpFt" step="0.1" min="0"></div>
+    <div class="row"><span>적용 범위</span><select id="hpScope"><option value="document">문서 전체</option><option value="section">현재 구역</option></select></div>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">적용</button></footer>
+  </form>
+</dialog>
+<input type="file" id="hwpImageInput" accept="image/png,image/jpeg" hidden>
 <input type="file" id="fileInput" accept="application/pdf,.pdf,.docx,.doc,.hwp,.hwpx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
 <input type="file" id="insertPdfInput" accept="application/pdf,.pdf" hidden>
 <input type="file" id="typingImageInput" accept="image/*" hidden>

@@ -354,7 +354,8 @@ export function createEditor(host, o) {
       PageBreak, ParagraphFormat, Tab, TableFormat,
       Extension.create({ name: 'pagination', addProseMirrorPlugins: () => [paginationPlugin(() => g, (n) => o.onPages?.(n))] }),
     ],
-    editorProps: { attributes: { class: 'typing-doc', spellcheck: 'false' } },
+    // data-gramm 등: Grammarly 같은 확장이 붙지 않게 — 문서가 확대·이동(CSS 변환)되므로 확장이 그리는 밑줄이 엉뚱한 곳에 뜸
+    editorProps: { attributes: { class: 'typing-doc', spellcheck: 'false', 'data-gramm': 'false', 'data-gramm_editor': 'false', 'data-enable-grammarly': 'false' } },
     // 글이 바뀌거나 커서가 움직였을 때만 (쪽 나눔 빈 칸만 바뀐 경우는 화면을 커서로 끌고 가지 않도록 구분)
     onUpdate: () => { o.onUpdate?.(); o.onSelection?.(true); },
     onSelectionUpdate: () => o.onSelection?.(true),

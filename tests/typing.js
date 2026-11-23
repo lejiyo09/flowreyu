@@ -39,6 +39,7 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.waitForTimeout(800);
   const meta = await page.evaluate(() => __flexnote.state.doc.meta);
   check('typing note created (kind/noteType typing, no PDF)', meta.kind === 'typing' && meta.noteType === 'typing' && meta.page.size === 'A4');
+  check('editor opts out of Grammarly-style overlays (they misplace underlines on the zoomed page)', await page.evaluate(() => document.querySelector('.typing-doc').getAttribute('data-gramm') === 'false' && document.querySelector('#textEditor').getAttribute('data-gramm') === 'false'));
   check('format bar + input tool shown, input tool active', await page.locator('#fmtBar').isVisible() && await page.locator('#toolbar [data-tool=type].on').isVisible());
 
   // ── 서식 ──
