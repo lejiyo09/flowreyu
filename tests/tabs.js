@@ -78,6 +78,13 @@ const check = (name, ok, info = '') => results.push(`${ok ? 'PASS' : 'FAIL'}  ${
   await page.waitForSelector('#editor:not([hidden])');
   await page.waitForTimeout(800);
   check('opening another note from home adds a tab', JSON.stringify(await tabNames()) === '["links","sample"]', JSON.stringify(await tabNames()));
+  // 글라스 모드: 탭 줄도 흐린 유리 (페이지 글자가 탭 뒤로 비쳐 읽히지 않게), 페이지는 탭 줄 아래에서 시작
+  await page.evaluate(() => __flexnote.settings.set('glass', true));
+  await page.waitForTimeout(400);
+  const gl = await page.evaluate(() => { const b = document.querySelector('#tabBar'), cs = getComputedStyle(b); return { blur: (cs.backdropFilter || cs.webkitBackdropFilter || '').includes('blur'), bottom: b.getBoundingClientRect().bottom, inset: __flexnote.viewer.insetTop, vpTop: document.querySelector('#viewport').getBoundingClientRect().top }; });
+  check('glass mode: tab bar is frosted and pages start below it', gl.blur && Math.abs(gl.vpTop + gl.inset - gl.bottom) < 2, JSON.stringify(gl));
+  await page.evaluate(() => __flexnote.settings.set('glass', false));
+  await page.waitForTimeout(300);
   await page.click('#btnBack');
   await page.waitForSelector('#library:not([hidden])');
   await page.click('.doc-card:has-text("links")', { button: 'right' });

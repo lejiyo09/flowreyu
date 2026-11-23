@@ -673,3 +673,12 @@ input[type=range] { accent-color: var(--accent); }
 #editor.hwp-mode #btnRec, #editor.hwp-mode #btnAi, #editor.hwp-mode #pageInd, #editor.hwp-mode #btnSearch { display: none !important; }
 .hb-badge { font-size: 11px; font-weight: 700; color: #fff; background: #1f6fd6; border-radius: 5px; padding: 2px 6px; margin-right: 4px; flex: none; }
 .fmt-bar button:disabled { opacity: .35; }
+
+/* 글라스 모드: 탭 줄·서식 도구 모음도 위쪽 바처럼 흐린 유리 (반투명만이면 스크롤된 페이지 글자가 탭 뒤로 그대로 비쳐 읽기 어려움) */
+:root.glass #editor > .tab-bar, :root.glass #editor > .fmt-bar {
+  background: var(--glass-bg-strong); border-color: var(--glass-line);
+  -webkit-backdrop-filter: blur(18px) saturate(160%); backdrop-filter: blur(18px) saturate(160%);
+}
+:root.glass #editor > .tab-bar .tab { background: transparent; border-color: var(--glass-line); }
+:root.glass #editor > .tab-bar .tab.on { background: var(--glass-bg-strong); box-shadow: 0 -1px 6px rgba(0, 0, 0, 0.06); }
+:root.glass #editor > .topbar + .tab-bar:not([hidden]) { box-shadow: var(--glass-shadow); }

@@ -21,7 +21,7 @@ import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsInterse
 import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest, linkHit, inactiveIds } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.4.1';
 const PDF_OPTS = {
   cMapUrl: new URL('../vendor/pdfjs/cmaps/', import.meta.url).href,
   cMapPacked: true,
