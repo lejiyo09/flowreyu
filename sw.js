@@ -7,7 +7,7 @@
 //   (실행 중에 코드가 섞이지 않도록 자동 교체는 하지 않는다)
 
 // <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)
-const VERSION = '833e331357bd';
+const VERSION = '21f32406b073';
 const PRECACHE = [
   "./",
   "index.html",
@@ -34,11 +34,34 @@ const PRECACHE = [
   "js/thumbs.js",
   "js/timer.js",
   "js/tools.js",
+  "js/typing-page.js",
+  "js/typing.js",
   "js/util.js",
   "js/viewer.js",
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/icon.svg",
+  "vendor/katex/fonts/KaTeX_AMS-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2",
+  "vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2",
+  "vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Main-Bold.woff2",
+  "vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2",
+  "vendor/katex/fonts/KaTeX_Main-Italic.woff2",
+  "vendor/katex/fonts/KaTeX_Main-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2",
+  "vendor/katex/fonts/KaTeX_Math-Italic.woff2",
+  "vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2",
+  "vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2",
+  "vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Script-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Size1-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Size2-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Size3-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Size4-Regular.woff2",
+  "vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2",
+  "vendor/katex/katex.min.css",
   "vendor/pdf-lib/pdf-lib.esm.min.js",
   "vendor/pdfjs/cmaps/78-EUC-H.bcmap",
   "vendor/pdfjs/cmaps/78-EUC-V.bcmap",
@@ -226,6 +249,8 @@ const PRECACHE = [
   "vendor/pdfjs/standard_fonts/LiberationSans-BoldItalic.ttf",
   "vendor/pdfjs/standard_fonts/LiberationSans-Italic.ttf",
   "vendor/pdfjs/standard_fonts/LiberationSans-Regular.ttf",
+  "vendor/tiptap/LICENSES.txt",
+  "vendor/tiptap/tiptap.mjs",
 ];
 // </precache>
 

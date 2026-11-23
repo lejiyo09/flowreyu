@@ -149,6 +149,7 @@ export class Viewer extends Emitter {
     this.pdf = null;
     this.doc = null;
     if (this.surface) {
+      this.surface.dispose?.(); // 타이핑형: 편집기 자리
       this.el.classList.remove('surface-' + this.surface.kind);
       this.surface = null;
       if (this.bgCanvas) { this.bgCanvas.style.display = 'none'; this.bgCanvas.width = this.bgCanvas.height = 0; }
@@ -342,7 +343,7 @@ export class Viewer extends Emitter {
 
   /** i 페이지로 이동. y 를 주면 페이지 안의 그 높이가 화면 위쪽에 오도록 */
   goToPage(i, y = 0) {
-    if (this.surface) { if (this.surface.kind === 'scroll') this.setCamera(this.cam.tx, MARGIN + this.insetTop - y * this.cam.z, this.cam.z); return; }
+    if (this.surface && this.surface.kind !== 'typing') { if (this.surface.kind === 'scroll') this.setCamera(this.cam.tx, MARGIN + this.insetTop - y * this.cam.z, this.cam.z); return; } // 타이핑형은 실제 쪽이 있어 아래 일반 처리
     i = clamp(i, 0, this.pages.length - 1);
     const p = this.pages[i];
     if (!p) return;

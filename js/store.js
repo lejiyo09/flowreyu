@@ -2,6 +2,8 @@
 // docs : 문서 메타데이터 {id, name, size, pageCount, created, updated, opened, view, thumb}
 //         kind: 없음(PDF 노트) | 'canvas'(무한 캔버스) | 'scroll'(무한 스크롤) — 뒤의 둘은 files 에 PDF 가 없고
 //         bg(배경 무늬)·size(스크롤 폭) 를 가진다. 필기는 pages 에 블록 레코드(page < 0)로 저장 (block-manager.js)
+//         'typing'(타이핑형 노트): files 에 문서 본문(ProseMirror JSON, application/json Blob), page(쪽 설정).
+//         필기 주석은 PDF 노트처럼 pages 에 쪽별로. noteType: 'handwriting' | 'typing' (없으면 필기형)
 // files: PDF 원본 {id, data: Blob}
 // pages: 페이지별 필기 {docId, page, items, rev, saved}  (키: [docId, page])
 // kv   : 기타 {k, v}  (예: lastDoc)
@@ -92,6 +94,16 @@ export async function addDocWithFile(doc, blob) {
   const tx = await store(['docs', 'files'], 'readwrite');
   tx.objectStore('files').put({ id: doc.id, data: blob });
   tx.objectStore('docs').put(doc);
+  return tx2p(tx);
+}
+
+/** 원본(파일) 내용만 바꾸기: 타이핑형 노트의 문서 본문(JSON) 자동 저장 */
+export async function putFile(id, blob, docPatch) {
+  const tx = await store(['files', 'docs'], 'readwrite');
+  tx.objectStore('files').put({ id, data: blob });
+  const ds = tx.objectStore('docs');
+  const cur = await req2p(ds.get(id));
+  if (cur) ds.put({ ...cur, ...(docPatch || {}), updated: Date.now() });
   return tx2p(tx);
 }
 

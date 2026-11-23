@@ -36,6 +36,7 @@
     <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" opacity=".45"/><path d="M4 4l16 16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></symbol>
     <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="1.7"/></symbol>
     <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="9.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.7" opacity=".45"/><path d="M8 10.5V8a4 4 0 0 1 7.7-1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" opacity=".45"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6 10h1M9.5 10h1M13 10h1M16.5 10h1.5M6 14h12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15.5 15.5 20.5 20.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
     <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 9v4.2l2.6 1.6M9.5 3h5M12 3v2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 6.5a1.5 1.5 0 0 1 1.5-1.5h4.2l2 2.2H19a1.5 1.5 0 0 1 1.5 1.5v9.3a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></symbol>
@@ -116,6 +117,49 @@
     </div>
   </header>
   <nav class="tab-bar" id="tabBar" data-ui hidden></nav>
+  <div class="fmt-bar" id="fmtBar" data-ui hidden>
+    <select id="fbStyle" title="문단 스타일"><option value="p">본문</option><option value="h1">제목 1</option><option value="h2">제목 2</option><option value="h3">제목 3</option></select>
+    <select id="fbFont" title="글꼴"></select>
+    <select id="fbSize" title="글자 크기 (pt)"></select>
+    <span class="fb-sep"></span>
+    <button data-fb="bold" title="굵게 (Ctrl+B)"><b>가</b></button>
+    <button data-fb="italic" title="기울임 (Ctrl+I)"><i>가</i></button>
+    <button data-fb="underline" title="밑줄 (Ctrl+U)"><u>가</u></button>
+    <button data-fb="strike" title="취소선"><s>가</s></button>
+    <button data-fb="superscript" title="위첨자">x²</button>
+    <button data-fb="subscript" title="아래첨자">x₂</button>
+    <label class="fb-color" title="글자색"><span class="fb-a">가</span><input type="color" id="fbColor" value="#c62828"></label>
+    <label class="fb-color hl" title="형광 배경"><span class="fb-a">가</span><input type="color" id="fbHl" value="#fff176"></label>
+    <span class="fb-sep"></span>
+    <button data-fb="left" title="왼쪽 정렬">⯇</button>
+    <button data-fb="center" title="가운데 정렬">≡</button>
+    <button data-fb="right" title="오른쪽 정렬">⯈</button>
+    <button data-fb="justify" title="양쪽 정렬">☰</button>
+    <select id="fbLine" title="줄 간격"><option value="">줄 간격</option><option value="1">1.0</option><option value="1.15">1.15</option><option value="1.5">1.5</option><option value="1.6">1.6 (기본)</option><option value="2">2.0</option><option value="2.5">2.5</option></select>
+    <select id="fbSpace" title="문단 뒤 간격"><option value="">문단 간격</option><option value="0">0pt</option><option value="4">4pt</option><option value="8">8pt</option><option value="12">12pt</option><option value="18">18pt</option></select>
+    <button data-fb="outdent" title="내어쓰기 / 들여쓰기 줄이기 (Shift+Tab)">⇤</button>
+    <button data-fb="indent" title="들여쓰기 (Tab)">⇥</button>
+    <button data-fb="hanging" title="첫 줄 내어쓰기 켜기/끄기">↰</button>
+    <button data-fb="bullet" title="글머리 기호">•≡</button>
+    <button data-fb="ordered" title="번호 매기기">1.</button>
+    <span class="fb-sep"></span>
+    <button data-fb="table" class="txt" title="표 넣기">표</button>
+    <button data-fb="image" class="txt" title="그림 넣기">그림</button>
+    <button data-fb="math" class="txt" title="수식 넣기 (LaTeX)">수식</button>
+    <button data-fb="link" class="txt" title="하이퍼링크">링크</button>
+    <button data-fb="pagebreak" class="txt" title="쪽 나누기 (Ctrl+Enter)">쪽 나눔</button>
+    <button data-fb="setup" class="txt" title="쪽 설정: 용지·방향·여백·머리글·바닥글·쪽 번호">쪽 설정</button>
+    <span class="fb-table" id="fbTable" hidden>
+      <span class="fb-sep"></span>
+      <button data-fb="rowAfter" class="txt" title="아래에 행 추가">+행</button>
+      <button data-fb="colAfter" class="txt" title="오른쪽에 열 추가">+열</button>
+      <button data-fb="rowDel" class="txt" title="행 삭제">−행</button>
+      <button data-fb="colDel" class="txt" title="열 삭제">−열</button>
+      <button data-fb="merge" class="txt" title="셀 병합 (여러 칸 선택 후)">병합</button>
+      <button data-fb="split" class="txt" title="셀 나누기">분할</button>
+      <button data-fb="tableDel" class="txt danger" title="표 삭제">표 삭제</button>
+    </span>
+  </div>
 
   <div class="work">
     <aside id="thumbs" class="thumbs" hidden>
@@ -197,6 +241,7 @@
   <nav id="toolbar" class="toolbar dock-bottom" data-ui>
     <button class="tb-grip" id="tbGrip" title="끌어서 옮기기 (위·아래·왼쪽·오른쪽에 붙음) · 탭: 가로/세로 바꾸기"><svg viewBox="0 0 12 22"><g fill="currentColor"><circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="11" r="1.6"/><circle cx="9" cy="11" r="1.6"/><circle cx="3" cy="18" r="1.6"/><circle cx="9" cy="18" r="1.6"/></g></svg></button>
     <div class="tools">
+      <button data-tool="type" title="입력: 키보드로 글쓰기 (타이핑형 노트)" hidden><svg><use href="#i-type"/></svg></button>
       <button data-tool="pen" title="펜"><svg><use href="#i-pen"/></svg></button>
       <button data-tool="hl" title="형광펜"><svg><use href="#i-hl"/></svg></button>
       <button data-tool="eraser" title="지우개"><svg><use href="#i-eraser"/></svg></button>
@@ -328,6 +373,7 @@
   </div>
   <div id="quickMenu" class="popup quick-menu" data-ui hidden>
     <div class="qm-tools">
+      <button data-tool="type" title="입력: 키보드로 글쓰기 (타이핑형 노트)" hidden><svg><use href="#i-type"/></svg></button>
       <button data-tool="pen" title="펜"><svg><use href="#i-pen"/></svg></button>
       <button data-tool="hl" title="형광펜"><svg><use href="#i-hl"/></svg></button>
       <button data-tool="eraser" title="지우개"><svg><use href="#i-eraser"/></svg></button>
@@ -443,14 +489,22 @@
     <header class="dlg-head"><h2>새 노트</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
     <div class="dlg-body">
       <div class="row"><span>이름</span><input type="text" id="nnName" value="새 노트" maxlength="80"></div>
-      <div class="row"><span>종류</span>
+      <div class="row"><span>노트 유형</span>
+        <div class="seg" id="nnType"><button type="button" value="handwriting" class="on">필기형</button><button type="button" value="typing">타이핑형</button></div>
+      </div>
+      <div class="row nn-hw"><span>형태</span>
         <select id="nnKind"><option value="pdf">페이지 노트</option><option value="scroll">무한 스크롤 (아래로 계속)</option><option value="canvas">무한 캔버스 (사방으로)</option></select>
       </div>
-      <div class="row"><span>속지·배경</span>
+      <div class="row nn-hw"><span>속지·배경</span>
         <select id="nnTemplate"><option value="blank">무지</option><option value="lined">줄 노트</option><option value="grid">모눈 (5mm)</option><option value="dot">점 격자</option></select>
       </div>
       <div class="row" id="nnSizeRow"><span>크기</span><select id="nnSize"><option value="A4">A4</option><option value="Letter">Letter</option></select></div>
       <div class="row" id="nnPagesRow"><span>페이지 수</span><input type="number" id="nnPages" value="20" min="1" max="500"></div>
+      <div class="row nn-ty" hidden><span>용지</span><select id="nnTSize"><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option><option value="Letter">Letter</option></select></div>
+      <div class="row nn-ty" hidden><span>방향</span><select id="nnTOrient"><option value="portrait">세로</option><option value="landscape">가로</option></select></div>
+      <div class="row nn-ty" hidden><span>여백</span><select id="nnTMargin"><option value="normal">보통 (위 20·아래 15·좌우 30mm)</option><option value="narrow">좁게 (12.7mm)</option><option value="wide">넓게 (25.4 · 31.7mm)</option></select></div>
+      <div class="row nn-ty" hidden><span>기본 글꼴</span><select id="nnTFont"></select></div>
+      <div class="row nn-ty" hidden><span>글자 크기</span><select id="nnTFontSize"><option>9</option><option>10</option><option selected>10.5</option><option>11</option><option>12</option><option>14</option></select></div>
     </div>
     <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok" id="nnOk">만들기</button></footer>
   </form>
@@ -481,6 +535,23 @@
       <p class="muted small" style="margin:6px 0 0">저장 공간이 부족하면 다른 노트를 지우거나 백업을 내려받아 두세요. 백업은 설정 → 필기 백업 가져오기로 되살릴 수 있습니다.</p>
     </div>
     <footer class="dlg-foot wrap"><button class="btn danger" value="discard">저장하지 않고 닫기</button><span class="foot-gap"></span><button class="btn" value="backup">백업 내려받기</button><button class="btn" value="stay">계속 편집</button><button class="btn primary" value="retry" autofocus>다시 시도</button></footer>
+  </form>
+</dialog>
+
+<dialog id="pageSetupDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner" novalidate>
+    <header class="dlg-head"><h2>쪽 설정</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+      <div class="row"><span>용지</span><select id="psSize"><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option><option value="Letter">Letter</option></select></div>
+      <div class="row"><span>방향</span><select id="psOrient"><option value="portrait">세로</option><option value="landscape">가로</option></select></div>
+      <div class="row"><span>여백 (mm)</span><span class="ps-margins">위 <input type="number" id="psMt" min="0" max="80" step="0.5"> 아래 <input type="number" id="psMb" min="0" max="80" step="0.5"> 왼쪽 <input type="number" id="psMl" min="0" max="80" step="0.5"> 오른쪽 <input type="number" id="psMr" min="0" max="80" step="0.5"></span></div>
+      <div class="row"><span>머리글</span><input type="text" id="psHeader" placeholder="예: 보고서 제목" maxlength="120"></div>
+      <div class="row"><span>바닥글</span><input type="text" id="psFooter" placeholder="{n} = 쪽 번호, {total} = 전체 쪽" maxlength="120"></div>
+      <div class="row"><span>쪽 번호</span><select id="psPageNum"><option value="center">아래 가운데</option><option value="right">아래 오른쪽</option><option value="left">아래 왼쪽</option><option value="none">없음</option></select></div>
+      <div class="row"><span>기본 글꼴</span><select id="psFont"></select></div>
+      <div class="row"><span>기본 크기</span><select id="psFontSize"><option>9</option><option>10</option><option>10.5</option><option>11</option><option>12</option><option>14</option></select></div>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">적용</button></footer>
   </form>
 </dialog>
 
@@ -542,6 +613,7 @@
 <div id="updateBar" class="update-bar" data-ui hidden><span>새 버전이 준비되었습니다</span><button class="btn sm primary">업데이트</button></div>
 <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
 <input type="file" id="insertPdfInput" accept="application/pdf,.pdf" hidden>
+<input type="file" id="typingImageInput" accept="image/*" hidden>
 <input type="file" id="imageInput" accept="image/*" hidden>
 <input type="file" id="backupInput" accept="application/json,.json" hidden>
 

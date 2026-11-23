@@ -161,7 +161,7 @@ function sanitize(s) {
   // 목록에 없는 모델(예전 기본값의 Pro 등)은 기본값으로
   if (!['gemini-3-flash-preview', 'gemini-flash-latest', 'gemini-flash-lite-latest'].includes(s.ai.model)) s.ai.model = DEFAULTS.ai.model;
   if (!['start', 'anytime'].includes(s.holdCondition)) s.holdCondition = 'start';
-  if (!['pen', 'hl', 'eraser', 'lasso', 'text', 'shape', 'link'].includes(s.tool)) s.tool = 'pen';
+  if (!['type', 'pen', 'hl', 'eraser', 'lasso', 'text', 'shape', 'link'].includes(s.tool)) s.tool = 'pen';
   return s;
 }
 

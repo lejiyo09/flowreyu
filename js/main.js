@@ -14,6 +14,7 @@ import { askAi, AiError, AI_MODELS, getApiKey, getUserKey, setApiKey, importKeyF
 import { InputDebugger } from './debug.js';
 import { CanvasEngine } from './canvas-engine.js';
 import { prepQuery, buildPdfIndex, findInIndex, findInItems } from './search.js';
+import { FONTS, MARGINS, DEFAULT_PAGE, pageGeom } from './typing-page.js';
 import { groupItems, ungroupItems, groupInfo, reorder, alignItems, selectionUnits, nudgeItems, cloneItems } from './arrange.js';
 import { ScrollEngine, contentBottom } from './scroll-engine.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsIntersect } from './util.js';
@@ -71,7 +72,13 @@ const viewer = new Viewer($('#viewport'), $('#world'), { bg: $('#cvBg'), hl: $('
 
 const app = {
   doc: () => state.doc,
-  isUiTarget: (el) => !!(el && el.closest && el.closest('[data-ui]')),
+  isUiTarget: (el, e) => {
+    if (!el?.closest) return false;
+    if (el.closest('[data-ui]')) return true;
+    // 타이핑형 노트의 글 영역 (입력 도구일 때): 마우스·펜은 브라우저 그대로(글자 선택·커서), 손가락은 화면 이동(탭 = 커서 놓기)
+    if (typing && settings.get('tool') === 'type' && el.closest('.typing-host')) return !e || e.pointerType === 'mouse' || e.pointerType === 'pen';
+    return false;
+  },
   runAction: (action, sx, sy, source) => runAction(action, sx, sy, source),
   showZoom: () => showZoomBadge(),
   onSelection: (sel, dragging, m) => { renderSelection(sel, dragging, m); $('#lyMoveSel').hidden = !sel; },
@@ -138,9 +145,12 @@ viewer.on('sized', () => { thumbs.resizeBoxes(); updatePageIndicator(); updateGl
 /** 글래스 디자인이면 위쪽 바가 페이지를 덮으므로, 페이지가 바 아래에서 시작하도록 뷰어에 알린다 */
 function updateGlassInset() {
   const glass = settings.get('glass') && state.screen === 'editor';
-  const topH = $('#editor > .topbar').offsetHeight, bar = $('#tabBar');
-  bar.style.top = glass ? topH + 'px' : ''; // 글래스: 위쪽 바처럼 화면 위에 떠 있음 → 그 아래에
-  const inset = glass ? topH + (bar.hidden ? 0 : bar.offsetHeight) : 0;
+  const topH = $('#editor > .topbar').offsetHeight, bar = $('#tabBar'), fmt = $('#fmtBar');
+  // 글래스: 위쪽 바처럼 화면 위에 떠 있음 → 탭 줄, 서식 도구 모음 순서로 그 아래에
+  const tabH = bar.hidden ? 0 : bar.offsetHeight;
+  bar.style.top = glass ? topH + 'px' : '';
+  fmt.style.top = glass ? topH + tabH + 'px' : '';
+  const inset = glass ? topH + tabH + (fmt.hidden ? 0 : fmt.offsetHeight) : 0;
   if (inset === viewer.insetTop) return;
   const dy = inset - viewer.insetTop;
   viewer.insetTop = inset;
@@ -253,7 +263,7 @@ async function renderLibrary() {
         <button data-a="rename">✎ 이름</button><button data-a="move">↪ 이동</button><button data-a="dup">⧉ 사본</button><button data-a="del" class="danger">삭제</button>
       </div>
       <div class="name">${escapeHtml(d.name)}</div>
-      <div class="meta">${KIND_LABEL[d.kind] || `${d.pageCount || '?'}쪽`} · ${formatDate(d.updated || d.created)}</div>`;
+      <div class="meta">${d.kind === 'typing' ? `타이핑 · ${d.pageCount || 1}쪽` : KIND_LABEL[d.kind] || `${d.pageCount || '?'}쪽`} · ${formatDate(d.updated || d.created)}</div>`;
     const longPressed = bindCardMenu(card, (at) => cardMenu(at, d));
     card.addEventListener('click', (e) => {
       if (longPressed()) return; // 길게 누른 뒤 손을 뗀 것은 열기 아님
@@ -566,6 +576,351 @@ document.addEventListener('drop', (e) => {
   importFiles([...(e.dataTransfer?.files || [])]);
 });
 
+// ───────────────────────────── 타이핑형 노트 ─────────────────────────────
+// 편집기는 typing.js(+vendor/tiptap) — 타이핑형 노트를 처음 열 때만 읽는다.
+// 본문(ProseMirror JSON)은 files 스토어에 자동 저장, 필기 주석은 PDF 노트처럼 쪽별로 pages 스토어에.
+let typingMod = null;
+let typing = null; // {engine, ed, meta, dirty, saving, error, timer, broken}
+
+async function createTypingDoc(name, page) {
+  const t = Date.now();
+  const meta = { id: uid('d'), name, kind: 'typing', noteType: 'typing', page, pageCount: 1, created: t, updated: t, opened: t, thumb: null, view: null, folder: curFolder };
+  const body = { type: 'doc', content: [{ type: 'paragraph' }] };
+  await store.addDocWithFile(meta, new Blob([JSON.stringify(body)], { type: 'application/json' }));
+  store.requestPersist();
+  return meta.id;
+}
+
+async function openTypingDoc(meta) {
+  typingMod ||= await import('./typing.js');
+  const blob = await store.getFile(meta.id);
+  let content = null;
+  try { content = blob ? JSON.parse(await blob.text()) : null; } catch { content = null; }
+  const broken = !!blob && !content;
+  const doc = new NoteDocument(meta);
+  const { skipped } = await doc.load();
+  state.doc = doc; state.pdf = null; state.blob = null;
+  wireDoc(doc);
+  initLayers(doc);
+  $('#docTitle').textContent = meta.name;
+  setSurfaceUi(meta);
+  showScreen('editor');
+  const engine = new typingMod.TypingEngine(meta.page);
+  engine.count = Math.max(1, meta.pageCount || 1); // 처음부터 저장된 쪽 수로 (열 때 출렁이지 않게)
+  viewer.openSurface(engine, doc, meta.view);
+  typing = { engine, meta, dirty: false, saving: null, error: null, timer: 0, broken };
+  typing.ed = typingMod.createEditor(engine.host, {
+    content, page: meta.page,
+    onPages: (n) => typingPages(n),
+    onUpdate: () => typingChanged(),
+    onSelection: (moved) => typingSelection(moved),
+    onMathEdit: (node, pos, kind) => editMath(node, pos, kind),
+  });
+  if (settings.get('tool') !== 'type') selectTool('type');
+  $('#fmtBar').hidden = false;
+  thumbs.clear();
+  placeAddPageButton();
+  updateHistoryButtons();
+  renderSaveState();
+  updatePageIndicator();
+  updateZoomLabel();
+  renderFmtBar();
+  updateGlassInset();
+  store.kvSet('lastDoc', meta.id).catch(() => {});
+  store.patchDoc(meta.id, { opened: Date.now() }).catch(() => {});
+  if (broken) toast('문서 본문이 손상되어 읽지 못했습니다. 덮어쓰지 않도록 이 노트는 본문을 저장하지 않습니다', { error: true, ms: 8000 });
+  if (skipped) toast(`손상된 필기 데이터 ${skipped}개를 건너뛰었습니다`, { error: true, ms: 5000 });
+}
+
+/** 노트를 닫을 때: 편집기 정리 */
+function closeTyping() {
+  if (!typing) return;
+  clearTimeout(typing.timer);
+  typing.ed.destroy();
+  typing = null;
+  $('#fmtBar').hidden = true;
+  updateGlassInset();
+}
+
+const saveTypingPages = debounce(() => { if (typing) store.patchDoc(typing.meta.id, { pageCount: typing.meta.pageCount }).catch(() => {}); }, 1000);
+function typingPages(n) {
+  if (!typing) return;
+  typing.engine.setCount(viewer, n);
+  if (typing.meta.pageCount !== n) { typing.meta.pageCount = n; saveTypingPages(); }
+  updatePageIndicator();
+}
+
+function typingChanged() {
+  if (!typing) return;
+  typing.dirty = true;
+  renderSaveState();
+  clearTimeout(typing.timer);
+  typing.timer = setTimeout(() => saveTyping(), 700);
+}
+
+/** 본문 저장. 실패하면 내용은 메모리에 두고 3초 뒤 다시 */
+async function saveTyping() {
+  const t = typing;
+  if (!t || t.broken) return true;
+  while (t.saving) await t.saving.catch(() => {});
+  if (!t.dirty) return !t.error;
+  t.dirty = false;
+  const body = new Blob([JSON.stringify(t.ed.editor.getJSON())], { type: 'application/json' });
+  t.saving = store.putFile(t.meta.id, body, { pageCount: t.meta.pageCount });
+  renderSaveState();
+  try {
+    await t.saving;
+    t.error = null;
+    return true;
+  } catch (e) {
+    console.error('[typing save]', e);
+    t.error = e;
+    t.dirty = true;
+    clearTimeout(t.timer);
+    t.timer = setTimeout(() => saveTyping(), 3000);
+    return false;
+  } finally {
+    t.saving = null;
+    if (typing === t) renderSaveState();
+  }
+}
+async function flushTyping() {
+  if (!typing) return true;
+  clearTimeout(typing.timer);
+  return saveTyping();
+}
+
+/** 손가락 탭 → 그 자리에 커서 (글자 위 링크면 열기) */
+function typingTap(sx, sy) {
+  const ed = typing.ed.editor;
+  const hit = ed.view.posAtCoords({ left: sx + viewer.rect.left, top: sy + viewer.rect.top });
+  if (!hit) { ed.chain().focus('end', { scrollIntoView: false }).run(); return; }
+  ed.chain().focus(undefined, { scrollIntoView: false }).setTextSelection(hit.pos).run();
+  const link = ed.state.doc.resolve(hit.pos).marks().find((m) => m.type.name === 'link');
+  if (link?.attrs.href) followTarget({ url: link.attrs.href });
+}
+
+let fmtRaf = 0, followCaret = false;
+/** moved: 글이 바뀌었거나 커서가 움직임 → 커서를 화면 안으로. 그 밖(쪽 나눔 갱신 등)은 도구 모음만 */
+function typingSelection(moved) {
+  if (moved) followCaret = true;
+  if (fmtRaf) return;
+  fmtRaf = requestAnimationFrame(() => {
+    fmtRaf = 0;
+    renderFmtBar();
+    updateHistoryButtons();
+    if (followCaret) { followCaret = false; keepCaretVisible(); }
+  });
+}
+
+/** 글을 쓰는 동안 커서가 화면 밖(또는 키보드·도구 모음 뒤)으로 가면 화면을 따라 옮긴다 (뷰포트는 스크롤되지 않으므로 직접) */
+function keepCaretVisible() {
+  const ed = typing?.ed.editor;
+  if (!ed?.isFocused) return;
+  let c;
+  try { c = ed.view.coordsAtPos(ed.state.selection.head); } catch { return; }
+  const vr = $('#viewport').getBoundingClientRect();
+  const vv = window.visualViewport;
+  const bottomLimit = Math.min(vr.bottom, vv ? vv.offsetTop + vv.height : vr.bottom) - 70; // 화면 키보드·아래 도구 모음 위로
+  const topLimit = vr.top + viewer.insetTop + 24;
+  let dy = 0, dx = 0;
+  if (c.bottom > bottomLimit) dy = c.bottom - bottomLimit;
+  else if (c.top < topLimit) dy = c.top - topLimit;
+  if (c.left < vr.left + 16) dx = c.left - vr.left - 16;
+  else if (c.right > vr.right - 16) dx = c.right - vr.right + 16;
+  if (dx || dy) viewer.setCamera(viewer.cam.tx - dx, viewer.cam.ty - dy, viewer.cam.z);
+}
+window.visualViewport?.addEventListener('resize', () => { if (typing) keepCaretVisible(); });
+
+// ── 서식 도구 모음 ──
+(function buildFmtBar() {
+  const fonts = FONTS.map(([v, n]) => `<option value="${escapeHtml(v)}">${escapeHtml(n)}</option>`).join('');
+  $('#fbFont').innerHTML = '<option value="">글꼴</option>' + fonts;
+  $('#fbSize').innerHTML = '<option value="">크기</option>' + [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72].map((n) => `<option value="${n}">${n}</option>`).join('');
+  $('#nnTFont').innerHTML = fonts;
+  $('#psFont').innerHTML = fonts;
+})();
+
+function renderFmtBar() {
+  const ed = typing?.ed.editor;
+  if (!ed) return;
+  const bar = $('#fmtBar');
+  const on = (k, v) => bar.querySelector(`[data-fb=${k}]`).classList.toggle('on', !!v);
+  for (const m of ['bold', 'italic', 'underline', 'strike', 'superscript', 'subscript']) on(m, ed.isActive(m));
+  for (const a of ['left', 'center', 'right', 'justify']) on(a, ed.isActive({ textAlign: a }));
+  on('bullet', ed.isActive('bulletList'));
+  on('ordered', ed.isActive('orderedList'));
+  const para = ed.getAttributes(ed.isActive('heading') ? 'heading' : 'paragraph');
+  on('hanging', para.hanging > 0);
+  $('#fbStyle').value = ed.isActive('heading', { level: 1 }) ? 'h1' : ed.isActive('heading', { level: 2 }) ? 'h2' : ed.isActive('heading', { level: 3 }) ? 'h3' : 'p';
+  const ts = ed.getAttributes('textStyle');
+  $('#fbFont').value = FONTS.some(([v]) => v === ts.fontFamily) ? ts.fontFamily : '';
+  const size = parseFloat(ts.fontSize);
+  $('#fbSize').value = [...$('#fbSize').options].some((o) => +o.value === size) ? String(size) : '';
+  $('#fbLine').value = para.lineHeight ? String(para.lineHeight) : '';
+  $('#fbSpace').value = para.spaceAfter != null ? String(para.spaceAfter) : '';
+  $('#fbTable').hidden = !ed.isActive('table');
+}
+
+// 버튼을 눌러도 편집기의 선택(커서)이 풀리지 않게
+$('#fmtBar').addEventListener('mousedown', (e) => { if (e.target.closest('button')) e.preventDefault(); });
+$('#fmtBar').addEventListener('click', (e) => {
+  const a = e.target.closest('[data-fb]')?.dataset.fb;
+  const ed = typing?.ed.editor;
+  if (!a || !ed) return;
+  if (settings.get('tool') !== 'type') selectTool('type');
+  const c = () => ed.chain().focus(undefined, { scrollIntoView: false });
+  const cmds = {
+    bold: () => c().toggleBold().run(), italic: () => c().toggleItalic().run(), underline: () => c().toggleUnderline().run(),
+    strike: () => c().toggleStrike().run(), superscript: () => c().toggleSuperscript().run(), subscript: () => c().toggleSubscript().run(),
+    left: () => c().setTextAlign('left').run(), center: () => c().setTextAlign('center').run(), right: () => c().setTextAlign('right').run(), justify: () => c().setTextAlign('justify').run(),
+    indent: () => c().indentMore().run(), outdent: () => c().indentLess().run(),
+    hanging: () => { const p = ed.getAttributes(ed.isActive('heading') ? 'heading' : 'paragraph'); c().setParagraphFormat({ hanging: p.hanging > 0 ? 0 : 20 }).run(); },
+    bullet: () => c().toggleBulletList().run(), ordered: () => c().toggleOrderedList().run(),
+    table: () => c().insertTable({ rows: 3, cols: 3, withHeaderRow: false }).run(),
+    image: () => $('#typingImageInput').click(),
+    math: () => { const latex = prompt('수식 (LaTeX)  예: \\frac{a}{b}, x^2, \\sqrt{x}', ''); if (latex && latex.trim()) c().insertInlineMath({ latex: latex.trim() }).run(); },
+    link: () => {
+      const cur = ed.getAttributes('link').href || '';
+      const url = prompt('링크 주소 (비우면 링크 해제)', cur || 'https://');
+      if (url === null) return;
+      const u = url.trim();
+      if (!u || u === 'https://') { c().extendMarkRange('link').unsetLink().run(); return; }
+      const href = /^[a-z][a-z0-9+.-]*:/i.test(u) ? u : 'https://' + u;
+      if (!/^(https?:|mailto:|tel:)/i.test(href)) { toast('http(s), mailto, tel 주소만 쓸 수 있습니다', { error: true }); return; }
+      if (ed.state.selection.empty && !ed.isActive('link')) c().insertContent({ type: 'text', text: u, marks: [{ type: 'link', attrs: { href } }] }).run();
+      else c().extendMarkRange('link').setLink({ href }).run();
+    },
+    pagebreak: () => { if (!c().setPageBreak().run()) toast('표 안에서는 쪽을 나눌 수 없습니다. 표 아래 문단에서 나누세요'); },
+    setup: () => openPageSetup(),
+    rowAfter: () => c().addRowAfter().run(), colAfter: () => c().addColumnAfter().run(),
+    rowDel: () => c().deleteRow().run(), colDel: () => c().deleteColumn().run(),
+    merge: () => { if (!c().mergeCells().run()) toast('합칠 칸들을 끌어서 함께 선택하세요'); },
+    split: () => { if (!c().splitCell().run()) toast('합쳐진 칸에서만 나눌 수 있습니다'); },
+    tableDel: () => c().deleteTable().run(),
+  };
+  cmds[a]?.();
+  renderFmtBar();
+});
+$('#fbStyle').addEventListener('change', (e) => {
+  const ed = typing?.ed.editor; if (!ed) return;
+  const v = e.target.value, c = ed.chain().focus(undefined, { scrollIntoView: false });
+  if (v === 'p') c.setParagraph().run(); else c.setHeading({ level: +v.slice(1) }).run();
+});
+$('#fbFont').addEventListener('change', (e) => { const ed = typing?.ed.editor; if (ed && e.target.value) ed.chain().focus(undefined, { scrollIntoView: false }).setFontFamily(e.target.value).run(); });
+$('#fbSize').addEventListener('change', (e) => { const ed = typing?.ed.editor; if (ed && e.target.value) ed.chain().focus(undefined, { scrollIntoView: false }).setFontSize(e.target.value + 'px').run(); });
+$('#fbLine').addEventListener('change', (e) => { const ed = typing?.ed.editor; if (ed) ed.chain().focus(undefined, { scrollIntoView: false }).setParagraphFormat({ lineHeight: e.target.value ? +e.target.value : null }).run(); });
+$('#fbSpace').addEventListener('change', (e) => { const ed = typing?.ed.editor; if (ed) ed.chain().focus(undefined, { scrollIntoView: false }).setParagraphFormat({ spaceAfter: e.target.value === '' ? null : +e.target.value }).run(); });
+$('#fbColor').addEventListener('input', (e) => { const ed = typing?.ed.editor; e.target.parentNode.style.setProperty('--fbc', e.target.value); if (ed) ed.chain().focus(undefined, { scrollIntoView: false }).setColor(e.target.value).run(); });
+$('#fbHl').addEventListener('input', (e) => { const ed = typing?.ed.editor; e.target.parentNode.style.setProperty('--fbc', e.target.value); if (ed) ed.chain().focus(undefined, { scrollIntoView: false }).setHighlight({ color: e.target.value }).run(); });
+$('#typingImageInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  const ed = typing?.ed.editor;
+  if (!f || !ed) return;
+  try {
+    const { src } = await typingMod.imageToDataUrl(f);
+    ed.chain().focus(undefined, { scrollIntoView: false }).setImage({ src, alt: f.name }).run();
+  } catch (err) { toast('그림을 넣을 수 없습니다: ' + (err?.message || err), { error: true }); }
+});
+
+/** 수식 누르면 고치기 (비우면 삭제) */
+function editMath(node, pos, kind) {
+  const ed = typing?.ed.editor;
+  if (!ed) return;
+  const latex = prompt('수식 고치기 (LaTeX, 비우면 삭제)', node.attrs.latex || '');
+  if (latex === null) return;
+  const c = ed.chain().focus(undefined, { scrollIntoView: false }).setNodeSelection(pos);
+  if (!latex.trim()) (kind === 'block' ? c.deleteBlockMath() : c.deleteInlineMath()).run();
+  else (kind === 'block' ? c.updateBlockMath({ latex }) : c.updateInlineMath({ latex })).run();
+}
+
+// ── 쪽 설정 ──
+function openPageSetup() {
+  if (!typing) return;
+  const p = pageGeom(typing.meta.page).page;
+  $('#psSize').value = p.size; $('#psOrient').value = p.orient;
+  $('#psMt').value = p.margin.t; $('#psMb').value = p.margin.b; $('#psMl').value = p.margin.l; $('#psMr').value = p.margin.r;
+  $('#psHeader').value = p.header || ''; $('#psFooter').value = p.footer || ''; $('#psPageNum').value = p.pageNum || 'center';
+  $('#psFont').value = p.font; $('#psFontSize').value = String(p.fontSize);
+  $('#pageSetupDlg').showModal();
+}
+$('#pageSetupDlg').addEventListener('close', () => {
+  if ($('#pageSetupDlg').returnValue !== 'ok' || !typing) return;
+  const n = (id, d) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? clamp(v, 0, 80) : d; };
+  const old = pageGeom(typing.meta.page).page;
+  const page = {
+    size: $('#psSize').value, orient: $('#psOrient').value,
+    margin: { t: n('#psMt', old.margin.t), b: n('#psMb', old.margin.b), l: n('#psMl', old.margin.l), r: n('#psMr', old.margin.r) },
+    header: $('#psHeader').value.trim(), footer: $('#psFooter').value.trim(), pageNum: $('#psPageNum').value,
+    font: $('#psFont').value, fontSize: +$('#psFontSize').value || old.fontSize,
+  };
+  const g = pageGeom(page);
+  if (g.contentW < 72 || g.contentH < 72) { toast('여백이 너무 넓어 글을 쓸 자리가 없습니다', { error: true }); return; }
+  typing.meta.page = page;
+  store.patchDoc(typing.meta.id, { page }).catch(() => {});
+  typing.engine.setPage(page);
+  typing.engine.layout(viewer);
+  viewer.clampCamera(); viewer.applyCamera(); viewer.emit('sized');
+  typing.ed.setPage(page);
+  toast('쪽 설정을 바꿨습니다');
+});
+
+// ── 인쇄 · PDF ──
+/** 쪽마다 한 장: 그 쪽 글(쪽 나눔 빈 칸 덕분에 쪽 경계에 걸친 것이 없음) + 머리글·바닥글 + 필기 */
+function printTyping() {
+  if (!typing) return;
+  const { engine, ed } = typing, g = engine.g, n = engine.count;
+  let root = $('#printRoot');
+  if (!root) { root = document.createElement('div'); root.id = 'printRoot'; document.body.appendChild(root); }
+  root.innerHTML = `<style>@page { size: ${g.W}pt ${g.H}pt; margin: 0 }</style>`;
+  const host = engine.host;
+  for (let k = 0; k < n; k++) {
+    const pg = document.createElement('div');
+    pg.className = 'print-page';
+    pg.style.cssText = `width:${g.W}pt;height:${g.H}pt`;
+    const inner = document.createElement('div');
+    inner.style.cssText = `position:absolute;left:0;top:0;width:${g.W}px;height:${g.H}px;zoom:${96 / 72}`; // 월드 1 = 1pt
+    inner.innerHTML = engine.decor(k, n);
+    const clip = document.createElement('div');
+    clip.className = 'print-clip typing-host';
+    clip.style.cssText = `left:${g.ml}px;top:${g.mt}px;width:${g.contentW}px;height:${g.contentH}px;font-family:${host.style.fontFamily};font-size:${host.style.fontSize};pointer-events:none;position:absolute`;
+    const body = ed.editor.view.dom.cloneNode(true);
+    body.removeAttribute('contenteditable');
+    // 편집 중에만 보이는 것 빼기: 그림 크기 손잡이, 선택 표시, 열 너비 손잡이
+    body.querySelectorAll('[data-resize-handle], .column-resize-handle, .ProseMirror-gapcursor').forEach((el) => el.remove());
+    body.querySelectorAll('.ProseMirror-selectednode, .selectedCell').forEach((el) => el.classList.remove('ProseMirror-selectednode', 'selectedCell'));
+    body.style.cssText = `position:absolute;left:0;top:${-k * g.stride}px;width:100%`;
+    clip.appendChild(body);
+    inner.appendChild(clip);
+    // 필기 (형광펜은 곱하기)
+    const items = layerSorted(state.doc.items(k));
+    const folded = foldHidden(items);
+    const vis = items.filter((it) => !folded?.has(it.id));
+    if (vis.length) {
+      const cv = document.createElement('canvas');
+      cv.className = 'print-ink';
+      cv.width = Math.round(g.W * 3); cv.height = Math.round(g.H * 3);
+      const ctx = cv.getContext('2d');
+      ctx.setTransform(3, 0, 0, 3, 0, 0);
+      ctx.globalCompositeOperation = 'multiply';
+      for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it, { print: true });
+      ctx.globalCompositeOperation = 'source-over';
+      for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it, { print: true });
+      const img = document.createElement('img');
+      img.className = 'print-ink';
+      img.src = cv.toDataURL('image/png');
+      inner.appendChild(img);
+    }
+    pg.appendChild(inner);
+    root.appendChild(pg);
+  }
+  const done = () => { root.innerHTML = ''; window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  toast('인쇄 창에서 대상을 "PDF로 저장"으로 고르면 PDF 파일이 됩니다', { ms: 4000 });
+  setTimeout(() => window.print(), 50);
+}
+
 // ───────────────────────────── 탭: 여러 노트를 열어 두고 오가기 ─────────────────────────────
 // 탭 목록은 저장해 두어 다시 켜도 유지. 탭을 바꾸면 지금 노트는 저장하고 닫은 뒤 다른 노트를 연다
 // (실행 취소 기록은 노트마다 따로라 탭을 바꾸면 이어지지 않음). 최근 PDF 몇 개는 읽은 결과를 기억해 바로 열림.
@@ -638,11 +993,18 @@ async function closeTab(id) {
 
 const KIND_LABEL = { canvas: '무한 캔버스', scroll: '무한 스크롤' };
 /** 새 노트 종류에 따라 필요한 칸만: 페이지 수는 PDF 노트만, 크기(폭)는 PDF·스크롤만 */
+/** 노트 유형은 필기형·타이핑형 두 가지. 필기형은 형태(페이지·무한 스크롤·무한 캔버스)와 속지, 타이핑형은 용지·방향·여백·글꼴 */
+let nnType = 'handwriting';
 function syncNewNoteForm() {
+  const typed = nnType === 'typing';
+  document.querySelectorAll('#nnType button').forEach((b) => b.classList.toggle('on', b.value === nnType));
+  document.querySelectorAll('#newNoteDlg .nn-hw').forEach((r) => { r.hidden = typed; });
+  document.querySelectorAll('#newNoteDlg .nn-ty').forEach((r) => { r.hidden = !typed; });
   const k = $('#nnKind').value;
-  $('#nnPagesRow').hidden = k !== 'pdf';
-  $('#nnSizeRow').hidden = k === 'canvas';
+  $('#nnPagesRow').hidden = typed || k !== 'pdf';
+  $('#nnSizeRow').hidden = typed || k === 'canvas';
 }
+document.querySelectorAll('#nnType button').forEach((b) => b.addEventListener('click', () => { nnType = b.value; syncNewNoteForm(); }));
 $('#nnKind').addEventListener('change', syncNewNoteForm);
 $('#btnNewNote').addEventListener('click', () => { syncNewNoteForm(); $('#newNoteDlg').showModal(); });
 
@@ -658,6 +1020,12 @@ async function createSurfaceDoc(kind, name, bg, size) {
 $('#newNoteDlg').addEventListener('close', async () => {
   if ($('#newNoteDlg').returnValue !== 'ok') return;
   const name = $('#nnName').value.trim() || '새 노트';
+  if (nnType === 'typing') {
+    const page = { ...DEFAULT_PAGE, size: $('#nnTSize').value, orient: $('#nnTOrient').value, margin: { ...MARGINS[$('#nnTMargin').value] }, font: $('#nnTFont').value, fontSize: +$('#nnTFontSize').value || DEFAULT_PAGE.fontSize };
+    try { await openDoc(await createTypingDoc(name, page)); }
+    catch (e) { console.error(e); toast('노트를 만들 수 없습니다: ' + store.describeError(e), { error: true }); }
+    return;
+  }
   const kind = $('#nnKind').value;
   if (kind !== 'pdf') {
     try { await openDoc(await createSurfaceDoc(kind, name, $('#nnTemplate').value, $('#nnSize').value)); }
@@ -688,9 +1056,10 @@ $('#newNoteDlg').addEventListener('close', async () => {
  */
 async function ensureSaved(doc) {
   for (;;) {
-    if (await doc.flush().catch(() => false)) return true;
+    const inkOk = await doc.flush().catch(() => false);
+    if (inkOk && (await flushTyping())) return true;
     const dlg = $('#saveFailDlg');
-    $('#sfReason').textContent = store.describeError(doc.saveError);
+    $('#sfReason').textContent = store.describeError(inkOk ? typing?.error : doc.saveError);
     dlg.showModal();
     const choice = await new Promise((res) => dlg.addEventListener('close', () => res(dlg.returnValue), { once: true }));
     if (choice === 'backup') { await exportBackup(doc).catch((e) => toast('백업 실패: ' + (e?.message || e), { error: true })); continue; }
@@ -715,9 +1084,10 @@ async function closeDoc() {
   const doc = state.doc;
   if (doc) {
     saveView.flush();
-    if (viewer.surface && (doc.undoStack.length || !doc.meta.thumb)) await saveSurfaceThumb(doc).catch(() => {});
+    if (viewer.surface && viewer.surface.kind !== 'typing' && (doc.undoStack.length || !doc.meta.thumb)) await saveSurfaceThumb(doc).catch(() => {});
     await doc.close({ force: true }).catch(() => false); // 위에서 저장을 확인했거나 버리기로 한 경우
   }
+  closeTyping();
   viewer.close();
   thumbs.clear();
   $('#backChip').hidden = true;
@@ -755,13 +1125,16 @@ async function openSurfaceDoc(meta) {
 
 /** 문서 종류에 따라 위쪽 바: 페이지 패널·페이지 표시는 PDF 노트용, 배경 선택은 무한 캔버스·스크롤용 */
 function setSurfaceUi(meta) {
-  const surf = !!KIND_LABEL[meta?.kind];
+  const typed = meta?.kind === 'typing';
+  document.querySelectorAll('[data-tool=type]').forEach((b) => { b.hidden = !typed; });
+  if (!typed && settings.get('tool') === 'type') selectTool('pen');
+  const surf = !!KIND_LABEL[meta?.kind] || typed; // 타이핑형도 페이지 패널·페이지 추가 없음 (쪽은 글을 따라 저절로)
   $('#btnThumbs').hidden = surf;
   if (surf && thumbs.open) { thumbs.show(false); $('#btnThumbs').classList.remove('on'); }
   $('#pageInd').hidden = meta?.kind === 'canvas';
   $('#btnAddPageTop').hidden = surf; // 무한 캔버스·스크롤은 페이지가 없음
-  $('#surfBg').hidden = !surf;
-  if (surf) $('#surfBg').value = meta.bg || 'blank';
+  $('#surfBg').hidden = !KIND_LABEL[meta?.kind];
+  if (KIND_LABEL[meta?.kind]) $('#surfBg').value = meta.bg || 'blank';
 }
 
 $('#surfBg').addEventListener('change', (e) => {
@@ -808,6 +1181,7 @@ async function openDoc(id) {
     const meta = await store.getDoc(id);
     if (!meta) throw new Error('문서를 찾을 수 없습니다');
     addTab(meta);
+    if (meta.kind === 'typing') { await openTypingDoc(meta); renderTabs(); busy(null); return; }
     if (KIND_LABEL[meta.kind]) { await openSurfaceDoc(meta); renderTabs(); busy(null); return; }
     setSurfaceUi(meta);
     let blob, pdf;
@@ -891,18 +1265,25 @@ window.addEventListener('beforeunload', (e) => {
 function renderSaveState() {
   const el = $('#saveState');
   const d = state.doc;
-  const s = d ? d.saveState : 'saved';
+  let s = d ? d.saveState : 'saved';
+  let err = d?.saveError;
+  // 타이핑형: 문서 본문 저장 상태도 합침 (실패 > 저장 중 > 변경됨)
+  if (typing && s !== 'error') {
+    if (typing.error) { s = 'error'; err = typing.error; }
+    else if (typing.saving) s = 'saving';
+    else if (typing.dirty && s === 'saved') s = 'pending';
+  }
   el.dataset.state = s;
   const label = { saved: '저장됨', pending: '변경됨', saving: '저장 중…', error: '저장 실패 · 다시 시도' }[s];
   el.querySelector('span').textContent = label;
-  el.title = s === 'error' ? store.describeError(d.saveError) : '자동 저장';
+  el.title = s === 'error' ? store.describeError(err) : '자동 저장';
   if (s === 'error' && !renderSaveState.warned) {
     renderSaveState.warned = true;
-    toast('저장 실패: ' + store.describeError(d.saveError) + ' — 자동으로 다시 시도합니다', { error: true, ms: 6000 });
+    toast('저장 실패: ' + store.describeError(err) + ' — 자동으로 다시 시도합니다', { error: true, ms: 6000 });
   }
   if (s === 'saved') renderSaveState.warned = false;
 }
-$('#saveState').addEventListener('click', () => state.doc?.flush());
+$('#saveState').addEventListener('click', () => { state.doc?.flush(); flushTyping(); });
 
 // ───────────────────────────── 상단 바 ─────────────────────────────
 
@@ -919,7 +1300,7 @@ function showZoomBadge() {
 }
 function updatePageIndicator() {
   if (!viewer.pages.length) return;
-  if (viewer.surface) {
+  if (viewer.surface && viewer.surface.kind !== 'typing') { // 타이핑형은 실제 쪽이 있어 아래 일반 처리
     // 무한 스크롤: 인쇄 페이지(시트) 기준
     if (viewer.surface.kind === 'scroll') $('#pageInd').textContent = `${viewer.surface.currentSheet(viewer) + 1} / ${Math.max(viewer.surface.sheetCount(viewer), viewer.surface.currentSheet(viewer) + 1)}`;
     return;
@@ -985,6 +1366,7 @@ async function exportPdf() {
   if (!doc) return;
   commitTextEdit();
   await doc.flush();
+  if (typing) { busy(null); printTyping(); return; } // 타이핑형: 인쇄 창(미리 보기 → PDF로 저장)
   busy('PDF 만드는 중…');
   try {
     if (viewer.surface) {
@@ -2421,6 +2803,7 @@ function userLinkAt(page, x, y) {
 
 async function followLinkAt(sx, sy) {
   if (!state.doc) return;
+  if (typing && settings.get('tool') === 'type') { typingTap(sx, sy); return; } // 타이핑형: 손가락 탭 = 그 자리에 커서
   const hit = viewer.pageAtScreen(sx, sy, true);
   if (!hit) return;
   if (tapObjectAt(hit.page, hit.x, hit.y)) return; // 손가락 탭으로도 포스트잇 접기/펼치기·체크
@@ -2445,7 +2828,7 @@ function followTarget(to) {
   if (!Number.isInteger(to?.page) || !viewer.pages[to.page]) { toast('링크 대상 페이지가 없습니다 (삭제되었을 수 있음)'); return; }
   const eng = viewer.surface;
   backAnchor = viewer.anchor();
-  const from = eng?.kind === 'scroll' ? eng.currentSheet(viewer) + 1 : backAnchor.page + 1;
+  const from = eng?.kind === 'scroll' ? eng.currentSheet(viewer) + 1 : viewer.currentPage() + 1;
   viewer.goToPage(to.page, to.y || 0);
   const chip = $('#backChip');
   chip.querySelector('span').textContent = `돌아가기 (${from}쪽)`;
@@ -2469,7 +2852,7 @@ function setLinkKind(kind) {
 /** 링크로 갈 수 있는 페이지 수: PDF 노트는 페이지, 무한 스크롤은 시트(인쇄 페이지), 무한 캔버스는 없음 */
 function linkPageCount() {
   const eng = viewer.surface;
-  if (!eng) return viewer.pages.length;
+  if (!eng || eng.kind === 'typing') return viewer.pages.length;
   return eng.kind === 'scroll' ? Math.round(viewer.pages[0].h / eng.sheetH) : 0;
 }
 function linkError(msg, input) {
@@ -2542,6 +2925,7 @@ lnDlg.addEventListener('close', () => {
 
 function doUndo() {
   if (!state.doc) return;
+  if (typing && settings.get('tool') === 'type') { typing.ed.editor.chain().focus().undo().run(); return; }
   commitTextEdit();
   const page = state.doc.undo();
   if (page == null) { toast('더 이상 실행 취소할 수 없습니다', { ms: 1200 }); return; }
@@ -2550,6 +2934,7 @@ function doUndo() {
 }
 function doRedo() {
   if (!state.doc) return;
+  if (typing && settings.get('tool') === 'type') { typing.ed.editor.chain().focus().redo().run(); return; }
   const page = state.doc.redo();
   if (page == null) { toast('다시 실행할 항목이 없습니다', { ms: 1200 }); return; }
   tools.validateSelection();
@@ -2557,6 +2942,12 @@ function doRedo() {
 }
 function updateHistoryButtons() {
   const d = state.doc;
+  if (typing && settings.get('tool') === 'type') {
+    const ed = typing.ed.editor;
+    $('#btnUndo').disabled = !ed.can().undo();
+    $('#btnRedo').disabled = !ed.can().redo();
+    return;
+  }
   $('#btnUndo').disabled = !d?.canUndo();
   $('#btnRedo').disabled = !d?.canRedo();
 }
@@ -2586,7 +2977,7 @@ document.addEventListener('keydown', (e) => {
   if (state.screen !== 'editor') return;
   // Ctrl+F: 브라우저 찾기 대신 앱 검색 (PDF 글자는 그림으로 그려져 브라우저가 못 찾음)
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && e.target.id !== 'textEditor') { e.preventDefault(); openSearch(); return; }
-  if (e.target.closest?.('input, textarea, select')) {
+  if (e.target.closest?.('input, textarea, select, [contenteditable="true"]')) {
     if (e.target.id === 'textEditor' && e.key === 'Escape') { e.preventDefault(); commitTextEdit(); }
     return;
   }
@@ -2628,7 +3019,7 @@ document.addEventListener('keydown', (e) => {
 
 // ───────────────────────────── 도구 모음 ─────────────────────────────
 
-const TOOL_NAMES = { pen: '펜', hl: '형광펜', eraser: '지우개', lasso: '올가미', text: '텍스트', shape: '도형', link: '링크' };
+const TOOL_NAMES = { type: '입력', pen: '펜', hl: '형광펜', eraser: '지우개', lasso: '올가미', text: '텍스트', shape: '도형', link: '링크' };
 
 function toolCfgKey(tool) { return ['pen', 'hl', 'text', 'shape'].includes(tool) ? tool : null; }
 
@@ -2651,6 +3042,9 @@ function selectTool(tool) {
 
 function renderToolbar() {
   const tool = settings.get('tool');
+  $('#viewport').classList.toggle('tool-type', tool === 'type');
+  if (tool !== 'type' && typing?.ed.editor.isFocused) typing.ed.editor.commands.blur(); // 펜으로 바꾸면 키보드 내림
+  if (typing) updateHistoryButtons();
   for (const b of document.querySelectorAll('#toolbar [data-tool], #quickMenu [data-tool]')) b.classList.toggle('on', b.dataset.tool === tool);
   const key = toolCfgKey(tool);
   const qc = $('#quickColors');

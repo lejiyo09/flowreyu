@@ -1,0 +1,21 @@
+{
+  "name": "flexnote-vendor-tiptap",
+  "private": true,
+  "description": "타이핑형 노트 편집기(Tiptap/ProseMirror)와 수식(KaTeX)을 vendor/ 에 한 파일로 묶는다. 앱은 빌드 없이 그 결과만 쓴다. 다시 묶기: npm i && npm run build",
+  "scripts": { "build": "node build.mjs" },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "@tiptap/core": "3.35.0",
+    "@tiptap/pm": "3.35.0",
+    "@tiptap/starter-kit": "3.35.0",
+    "@tiptap/extension-text-style": "3.35.0",
+    "@tiptap/extension-text-align": "3.35.0",
+    "@tiptap/extension-table": "3.35.0",
+    "@tiptap/extension-image": "3.35.0",
+    "@tiptap/extension-highlight": "3.35.0",
+    "@tiptap/extension-subscript": "3.35.0",
+    "@tiptap/extension-superscript": "3.35.0",
+    "@tiptap/extension-mathematics": "3.35.0",
+    "katex": "0.18.11"
+  }
+}

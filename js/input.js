@@ -91,7 +91,7 @@ export class InputRouter {
   // ───────── 분류 ─────────
 
   onDown(e) {
-    if (!this.enabled || this.app.isUiTarget(e.target)) return;
+    if (!this.enabled || this.app.isUiTarget(e.target, e)) return;
     this.viewer.updateRect();
     this.touch.stopInertia();
     this.notePen(e);
@@ -736,7 +736,7 @@ class MouseInput {
   }
 
   onWheel(e) {
-    if (this.r.app.isUiTarget(e.target)) return;
+    if (this.r.app.isUiTarget(e.target, e)) return;
     e.preventDefault();
     const v = this.r.viewer;
     const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? v.vh : 1;
