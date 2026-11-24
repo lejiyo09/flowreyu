@@ -655,7 +655,8 @@ input[type=range] { accent-color: var(--accent); }
   .print-page .pg-break { border: 0; }
 }
 /* 가져온 문서의 탭·목차 채움선 */
-.typing-doc .doc-tab { display: inline-block; min-width: 2.5em; white-space: pre; }
+.typing-doc.ProseMirror .doc-tab[contenteditable] { white-space: pre; } /* 진짜 탭 문자: 문단 시작부터 0.5인치(36pt) 간격 탭 위치까지 띄움 (ProseMirror 기본 CSS 의 white-space:normal 보다 우선) */
+.typing-doc { tab-size: 36px; -moz-tab-size: 36px; }
 .typing-doc .tab-lead { display: flex; align-items: baseline; }
 .typing-doc .tab-lead > .doc-tab { flex: 1; min-width: 1.5em; margin: 0 3px; border-bottom: 1.2px dotted currentColor; height: 0.2em; }
 .typing-doc .tab-lead-hyphen > .doc-tab { border-bottom-style: dashed; }

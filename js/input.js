@@ -72,7 +72,12 @@ export class InputRouter {
     el.addEventListener('touchend', (e) => this.onTouchListEnd(e));
     el.addEventListener('touchcancel', (e) => this.onTouchListEnd(e));
     el.addEventListener('dragstart', (e) => e.preventDefault());
-    el.addEventListener('selectstart', (e) => { if (!this.app.isUiTarget(e.target)) e.preventDefault(); });
+    el.addEventListener('selectstart', (e) => {
+      // 글 편집 칸(타이핑 노트·글상자 등) 안에서는 막지 않음: 키보드 Shift+방향키 선택도 selectstart 로 시작됨
+      const t = e.target.nodeType === 1 ? e.target : e.target.parentElement;
+      if (t?.closest?.('[contenteditable="true"], input, textarea')) return;
+      if (!this.app.isUiTarget(e.target)) e.preventDefault();
+    });
     // 뷰포트 밖(도구 모음 위 등)에서 손을 떼도 상태가 남지 않도록
     window.addEventListener('pointerup', (e) => this.onGlobalEnd(e, false), true);
     window.addEventListener('pointercancel', (e) => this.onGlobalEnd(e, true), true);

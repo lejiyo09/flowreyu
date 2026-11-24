@@ -10,7 +10,7 @@
 //  - 단위: 월드 1 = 1pt (PDF 노트와 같음). 글자 크기 "12px" 로 저장된 값은 12pt 와 같다.
 import {
   Editor, Extension, Node, StarterKit, TextStyleKit, TextAlign, TableKit, Image, Highlight, Subscript, Superscript, Mathematics,
-  Plugin, PluginKey, Decoration, DecorationSet,
+  Plugin, PluginKey, Decoration, DecorationSet, TextSelection,
 } from '../vendor/tiptap/tiptap.mjs';
 import { clamp } from './util.js';
 import { pageGeom, GAP } from './typing-page.js';
@@ -183,9 +183,87 @@ const ParagraphFormat = Extension.create({
     };
   },
   addKeyboardShortcuts() {
+    // Word·한글처럼: 줄 중간에서 Tab = 그 자리에 탭(다음 탭 위치까지 띄움). 여러 문단을 고르면 들여쓰기,
+    // 목록 항목 맨 앞이면 한 단계 안으로, 표 안이면 다음 칸(표 기본 동작)
+    const atBlockStart = (sel) => sel.empty && sel.$from.parentOffset === 0;
     return {
-      Tab: () => (this.editor.isActive('table') ? false : this.editor.commands.indentMore()),
-      'Shift-Tab': () => (this.editor.isActive('table') ? false : this.editor.commands.indentLess()),
+      Tab: () => {
+        const ed = this.editor, sel = ed.state.selection;
+        if (ed.isActive('table')) return false;
+        if (ed.isActive('listItem') && atBlockStart(sel)) return ed.commands.sinkListItem('listItem');
+        if (!sel.empty && (!sel.$from.parent.isTextblock || !sel.$from.sameParent(sel.$to))) return ed.commands.indentMore(); // 여러 문단·전체 선택
+        return ed.chain().insertContent({ type: 'tab' }).run();
+      },
+      'Shift-Tab': () => {
+        const ed = this.editor, sel = ed.state.selection;
+        if (ed.isActive('table')) return false;
+        if (ed.isActive('listItem')) return ed.commands.liftListItem('listItem');
+        const before = sel.empty ? sel.$from.nodeBefore : null;
+        if (before?.type.name === 'tab') return ed.chain().deleteRange({ from: sel.from - 1, to: sel.from }).run(); // 바로 앞 탭 지우기
+        return ed.commands.indentLess();
+      },
+    };
+  },
+});
+
+/**
+ * Shift+방향키·Home·End 로 선택 넓히기를 편집기가 직접 계산.
+ * 브라우저 기본 동작에 맡기면, 편집기가 화면을 다시 그리는 순간과 겹칠 때 넓힌 선택이 되돌아가 버림(빠르게 누를 때)
+ */
+const SelectKeys = Extension.create({
+  name: 'selectKeys',
+  addKeyboardShortcuts() {
+    let goalX = null; // 위·아래로 옮길 때 유지할 가로 위치
+    const extend = (headFn, keepGoal = false) => () => {
+      const view = this.editor.view, { state } = view, sel = state.selection;
+      const head = headFn(view, sel.head);
+      if (!keepGoal) goalX = null;
+      if (head == null || head === sel.head) return true; // 끝에 닿음: 브라우저 동작도 막음
+      const next = TextSelection.between(state.doc.resolve(sel.anchor), state.doc.resolve(head));
+      view.dispatch(state.tr.setSelection(next).scrollIntoView());
+      return true;
+    };
+    const clampPos = (view, p) => Math.max(0, Math.min(view.state.doc.content.size, p));
+    const step = (dir) => (view, head) => {
+      // 한 글자: 문단 경계면 다음 문단의 글자 자리로
+      let p = clampPos(view, head + dir);
+      const $p = view.state.doc.resolve(p);
+      if (!$p.parent.inlineContent) { const near = TextSelection.findFrom($p, dir, true); if (near) p = near.head; }
+      return p;
+    };
+    const coords = (view, pos) => { try { return view.coordsAtPos(pos); } catch { return null; } };
+    const blockRect = (view, pos) => {
+      let el = view.domAtPos(pos).node;
+      if (el.nodeType !== 1) el = el.parentElement;
+      el = el.closest('p, h1, h2, h3, h4, h5, h6, li, td, th, pre') || view.dom;
+      return el.getBoundingClientRect();
+    };
+    const lineEdge = (end) => (view, head) => {
+      const c = coords(view, head);
+      if (!c) return null;
+      const r = blockRect(view, head), y = (c.top + c.bottom) / 2;
+      const hit = view.posAtCoords({ left: end ? r.right - 1 : r.left + 1, top: y });
+      if (!hit) return null;
+      const $h = view.state.doc.resolve(head);
+      // 같은 문단 안으로 제한 (줄 끝 좌표가 옆 칸·다음 문단을 가리키지 않게)
+      return Math.max($h.start(), Math.min($h.end(), hit.pos));
+    };
+    const vertical = (dir) => (view, head) => {
+      const c = coords(view, head);
+      if (!c) return null;
+      if (goalX == null) goalX = c.left;
+      const lh = Math.max(4, c.bottom - c.top);
+      const hit = view.posAtCoords({ left: goalX, top: dir < 0 ? c.top - lh * 0.6 : c.bottom + lh * 0.6 });
+      if (!hit) return dir < 0 ? 0 : view.state.doc.content.size; // 맨 위·아래 줄: 문서 처음·끝까지
+      return hit.pos;
+    };
+    return {
+      'Shift-ArrowLeft': extend(step(-1)),
+      'Shift-ArrowRight': extend(step(1)),
+      'Shift-ArrowUp': extend(vertical(-1), true),
+      'Shift-ArrowDown': extend(vertical(1), true),
+      'Shift-Home': extend(lineEdge(false)),
+      'Shift-End': extend(lineEdge(true)),
     };
   },
 });
@@ -351,7 +429,7 @@ export function createEditor(host, o) {
         inlineOptions: { onClick: (node, pos) => o.onMathEdit?.(node, pos, 'inline') },
         blockOptions: { onClick: (node, pos) => o.onMathEdit?.(node, pos, 'block') },
       }),
-      PageBreak, ParagraphFormat, Tab, TableFormat,
+      PageBreak, ParagraphFormat, Tab, TableFormat, SelectKeys,
       Extension.create({ name: 'pagination', addProseMirrorPlugins: () => [paginationPlugin(() => g, (n) => o.onPages?.(n))] }),
     ],
     // data-gramm 등: Grammarly 같은 확장이 붙지 않게 — 문서가 확대·이동(CSS 변환)되므로 확장이 그리는 밑줄이 엉뚱한 곳에 뜸
