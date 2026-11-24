@@ -942,6 +942,7 @@ async function hwpAction(a) {
   else if (a === 'colAfter') hwpDo(s.tableGrid('insert-column'));
   else if (a === 'rowDel') hwpDo(s.tableGrid('delete-row'));
   else if (a === 'colDel') hwpDo(s.tableGrid('delete-column'));
+  else if (a === 'blockRight' || a === 'blockDown') { if (!(await s.extendCellBlock(a === 'blockRight' ? 'ArrowRight' : 'ArrowDown'))) toast('먼저 표의 칸을 누르세요', { ms: 1800 }); }
   else if (a === 'merge') hwpDo(s.mergeCells(), '셀을 합쳤습니다');
   else if (a === 'split') {
     const dlg = $('#hwpSplitDlg');
@@ -950,6 +951,17 @@ async function hwpAction(a) {
     await hwpDo(s.splitCell(clamp(+$('#hsRows').value || 1, 1, 50), clamp(+$('#hsCols').value || 2, 1, 50)), '셀을 나눴습니다');
   }
   else if (a === 'image') $('#hwpImageInput').click();
+  else if (a === 'equation') hwpEquationDlg();
+  else if (a === 'footnote' || a === 'endnote') {
+    const kind = a === 'footnote' ? 'foot' : 'end';
+    $('#hnTitle').textContent = kind === 'foot' ? '각주 넣기' : '미주 넣기';
+    $('#hnBody').value = '';
+    const dlg = $('#hwpNoteDlg');
+    dlg.showModal();
+    $('#hnBody').focus();
+    if (await dialogResult(dlg) !== 'ok') { s.focus(); return; }
+    await hwpDo(hwpWithReload(() => s.insertNote(kind, $('#hnBody').value)), kind === 'foot' ? '각주를 넣었습니다' : '미주를 넣었습니다');
+  }
   else if (a === 'page') hwpPageSetup();
   else if (a === 'find') openSearch(true);
   else if (a === 'ink-pen') hwpInkMode('pen');
@@ -959,6 +971,42 @@ async function hwpAction(a) {
   else if (a === 'pdf') exportHwpPdf();
   else if (a === 'print') printHwp();
   else if (a === 'info') showHwpInfo();
+}
+/**
+ * 엔진이 방금 넣은 개체(주석 등) 근처에서 글 위치를 못 맞추면(TextMismatch) 계속 거절함 →
+ * 묻고 나서 문서를 저장·다시 열어(커서 자리 유지) 한 번 더 (그 전 실행 취소 기록은 비워짐)
+ */
+async function hwpWithReload(fn) {
+  const why = await fn();
+  if (!why || !/Mismatch/.test(why)) return why;
+  if (!confirm('엔진이 방금 넣은 개체 근처의 글 위치를 다시 맞춰야 합니다.\n문서를 한 번 저장해 다시 열고 계속할까요? (내용은 그대로, 그 전 실행 취소 기록은 사라집니다)')) return '취소했습니다';
+  await hwp.session.reload();
+  return fn();
+}
+/** 수식 창: 새 수식 넣기, 또는 (HWP5) 기존 수식 골라 고치기 */
+async function hwpEquationDlg() {
+  const s = hwp?.session;
+  if (!s) return;
+  const list = s.equations();
+  const which = $('#heWhich');
+  which.innerHTML = '<option value="new">새 수식 넣기 (커서 자리)</option>' + list.map((x, k) => `<option value="${k}">기존 수식 ${k + 1} 고치기</option>`).join('');
+  $('#heWhichRow').hidden = !list.length;
+  $('#heScript').value = '';
+  let cap = null;
+  which.onchange = async () => {
+    s.releaseEquation(cap); cap = null;
+    $('#heScript').value = '';
+    if (which.value === 'new') return;
+    try { cap = await s.readEquation(list[+which.value].row); $('#heScript').value = cap.script; }
+    catch (e) { toast('이 수식은 고칠 수 없습니다: ' + (e?.message || e), { ms: 3000 }); which.value = 'new'; }
+  };
+  const dlg = $('#hwpEqDlg');
+  dlg.showModal();
+  $('#heScript').focus();
+  const ok = await dialogResult(dlg) === 'ok';
+  if (!ok) { s.releaseEquation(cap); s.focus(); return; }
+  if (cap) await hwpDo(s.editEquation(cap, $('#heScript').value), '수식을 고쳤습니다');
+  else await hwpDo(hwpWithReload(() => s.insertEquation($('#heScript').value)), '수식을 넣었습니다');
 }
 function dialogResult(dlg) { return new Promise((res) => dlg.addEventListener('close', () => res(dlg.returnValue), { once: true })); }
 
@@ -980,17 +1028,19 @@ $('#hwpImageInput').addEventListener('change', async (e) => {
       bytes = new Uint8Array(await (await new Promise((r) => c.toBlob(r, 'image/png'))).arrayBuffer());
     }
     bmp.close?.();
-    await hwpDo(hwp.session.insertImage(bytes, w, hgt), '그림을 넣었습니다');
+    await hwpDo(hwp.session.insertImageFresh(bytes, w, hgt), '그림을 넣었습니다');
   } catch (err) { toast('그림을 읽지 못했습니다: ' + (err?.message || err), { error: true }); }
 });
 
 /** 엔진 단축키 → 앱 동작. check=true 면 할 수 있는지만 */
 function hwpShortcut(cmd, check) {
   const map = { bold: 'bold', italic: 'italic', underline: 'underline', 'align-left': 'left', 'align-center': 'center', 'align-right': 'right', 'align-justify': 'justify', 'insert-table': 'table', find: 'find', replace: 'find', save: 'save', undo: 'undo', redo: 'redo' };
-  const special = { copy: 1, cut: 1, paste: 1 };
+  const special = { copy: 1, cut: 1, paste: 1, 'table-cell-block': 1, 'table-cell-block-extend': 1, 'block-selection': 1 };
   if (check) return !!(map[cmd] || special[cmd]);
   if (cmd === 'copy' || cmd === 'cut') { hwp?.session.copy(cmd === 'cut').then((why) => why && toast(why, { ms: 1800 })); return; }
   if (cmd === 'paste') { hwp?.session.surface.focusForPaste?.(); return; }
+  if (cmd === 'table-cell-block' || cmd === 'table-cell-block-extend') { if (!hwp?.session.cellBlock(cmd.endsWith('extend'))) toast('표의 칸 안에서 F5 를 누르세요', { ms: 1800 }); return; } // F5: 칸 블록 (합치기용)
+  if (cmd === 'block-selection') { hwp?.session.surface.requestBlockSelection?.(); return; }
   if (cmd === 'replace') { openSearch(true); return; }
   if (map[cmd]) hwpAction(map[cmd]);
 }
@@ -1014,7 +1064,9 @@ async function hwpPageSetup() {
   const values = { orientation: $('#hpOrient').value, gutter_type: v.gutter_type, width: num('#hpW', v.width), height: num('#hpH', v.height),
     margin: { ...m, top: num('#hpT', 20), bottom: num('#hpB', 15), left: num('#hpL', 30), right: num('#hpR', 30), header: num('#hpHd', 15), footer: num('#hpFt', 15), gutter: m.gutter ?? 0 } };
   s.reloaded = false;
-  const ok = await hwpDo(s.setPageSettings(r.read, values, $('#hpScope').value), '쪽 설정을 바꿨습니다');
+  const ok = await hwpDo(s.setPageSettings(r.read, values, $('#hpScope').value, {
+    confirmReload: async () => confirm('이번에 새로 넣은 표·그림이 있어, 쪽 설정을 바꾸려면 문서를 한 번 저장해 다시 열어야 합니다.\n그 전까지의 실행 취소 기록은 사라집니다 (내용은 그대로). 계속할까요?'),
+  }), '쪽 설정을 바꿨습니다');
   if (ok && s.reloaded) toast('쪽 설정을 바꿨습니다 · 새로 넣은 표·그림을 정리하려고 문서를 다시 열어서, 그 전 실행 취소 기록은 비워졌습니다', { ms: 4500 });
   updateHistoryButtons();
 }

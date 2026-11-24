@@ -148,7 +148,7 @@ export class HwpSession {
   }
 
   /** 문단 정렬 left/center/right/justify (커서만 있어도 그 문단) */
-  async align(alignment) {
+  async _align(alignment) {
     await this.settle();
     const target = this.state().selection || this.selection();
     if (!target) return '먼저 문단을 누르세요';
@@ -217,7 +217,7 @@ export class HwpSession {
 
   // ── 표 ──
   /** 커서 자리에 rows×cols 표 (너비 pt). 실패하면 이유 */
-  async insertTable(rows, cols, widthPt = 450, rowHeightPt = 18) {
+  async _insertTable(rows, cols, widthPt = 450, rowHeightPt = 18) {
     await this.settle();
     const st = this.state();
     const target = H.getSelectionFormatting(st).target;
@@ -226,43 +226,163 @@ export class HwpSession {
     return this.run(H.INSERT_TABLE_COMMAND, { target, options: { rows, columns: cols, width: Math.max(cols, Math.round(widthPt * 100)), rowHeight: Math.round(rowHeightPt * 100), resources: av.resources } });
   }
   /** 표 행·열: action 'insert-row'|'delete-row'|'insert-column'|'delete-column' (지금 셀 기준, 넣기는 아래·오른쪽) */
-  async tableGrid(action) {
+  async _tableGrid(action) {
     await this.settle();
     const st = this.state();
     const src = this.surface.captureSourceTableGridSelection?.();
     if (src && src.state === st && src.current()) {
+      const prevSel = st.selection;
       const index = (action.endsWith('row') ? src.row : src.column) + (action.startsWith('insert') ? 1 : 0);
       if (action === 'delete-row' && src.rows === 1) return '마지막 행은 지울 수 없습니다 (표를 지우려면 표 전체를 선택해 지우세요)';
       if (action === 'delete-column' && src.columns === 1) return '마지막 열은 지울 수 없습니다';
-      const r = await this.editor.dispatchCommand(H.EDIT_SOURCE_TABLE_GRID_COMMAND, {
+      const payload = Object.freeze({
         section: src.section, tableNode: src.tableNode, expectedRows: src.rows, expectedColumns: src.columns, action, index,
         ...(st.content?.format === 'hwp5' ? { layout: 'observed8' } : {}),
-      }).catch((e) => ({ error: e?.message }));
-      if (r?.status === 'committed-with-snapshot') src.recordHistory?.(r, null);
-      return /^committed/.test(r?.status || '') ? null : describe(r?.error || r?.status);
+      });
+      const r = await this.editor.dispatchCommand(H.EDIT_SOURCE_TABLE_GRID_COMMAND, payload).catch((e) => ({ error: e?.message }));
+      if (r?.status === 'committed-with-snapshot') { try { src.recordHistory?.(r, payload); } catch { /* 실행 취소 기록 연결 실패는 편집 결과에 영향 없음 */ } }
+      if (!/^committed/.test(r?.status || '')) return describe(r?.error || r?.status);
+      await this.editor.refresh?.().catch(() => {}); // 표 구조가 바뀌면 엔진이 화면을 다시 확인해야 다음 표 편집을 받음
+      await this.restoreCaret(prevSel); // 같은 칸에 커서를 다시 (이어서 행·열을 또 바꿀 수 있게)
+      return null;
     }
     const gen = this.surface.captureGeneratedTableGridSelection?.();
     if (gen && gen.state === st && gen.current()) {
-      const c = gen.createdCell;
+      const c = gen.createdCell, prevSel = st.selection;
       const index = (action.endsWith('row') ? c.row : c.column) + (action.startsWith('insert') ? 1 : 0);
-      return this.run(H.EDIT_CREATED_TABLE_GRID_COMMAND, { section: gen.section, identity: c.identity, action, index });
+      const why = await this.run(H.EDIT_CREATED_TABLE_GRID_COMMAND, { section: gen.section, identity: c.identity, action, index });
+      if (!why) await this.restoreCaret(prevSel);
+      return why;
     }
     return '표의 칸을 누르세요 (행·열을 바꾼 뒤에는 칸을 다시 눌러야 합니다)';
   }
+  /** 표 바꾸기 직전의 화면 위치(마지막으로 누른 곳)를 다시 눌러 커서를 되돌림 */
+  async restoreCaret(prevSel) {
+    // 1) 엔진 선택 API 로 같은 칸·같은 자리 (토큰만 새 상태로)
+    if (prevSel) {
+      try {
+        const st = this.state(), t = st.token || {};
+        await this.editor.setSelection({ ...prevSel, editorId: t.editorId ?? st.editorId, documentId: t.documentId ?? st.documentId, generation: t.generation ?? st.generation, operationRevision: t.operationRevision ?? st.operationRevision, viewRevision: t.viewRevision ?? st.viewRevision });
+        if (this.surface.captureSourceTableGridSelection?.() || this.surface.captureGeneratedTableGridSelection?.()) { this.focus(); return; }
+      } catch { /* 2) 화면 누르기로 */ }
+    }
+    const p = this.lastPoint;
+    if (!p) return;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const t = document.elementFromPoint(p.x, p.y);
+    if (!t || !this.surface || !t.closest?.('.hwp-root') || t.classList.contains('hwp-ink')) return;
+    const o = { bubbles: true, cancelable: true, composed: true, clientX: p.x, clientY: p.y, button: 0, pointerId: 1, pointerType: 'mouse', isPrimary: true, view: window };
+    t.dispatchEvent(new PointerEvent('pointerdown', { ...o, buttons: 1 }));
+    t.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 }));
+    t.dispatchEvent(new MouseEvent('click', { ...o, buttons: 0, detail: 1 }));
+    this.focus();
+  }
   /** 셀 합치기: 칸 여러 개를 블록으로 선택한 뒤 (F5 또는 끌기) */
-  async mergeCells() {
+  async _mergeCells() {
     const m = this.surface.captureSourceTableCellMerge?.();
-    if (!m) return '합칠 칸을 두 개 이상 선택하세요 (칸 안에서 F5 뒤 방향키, 또는 끌어서)';
+    if (!m) return this.fileFormat === 'hwp5' ? 'HWP(.hwp) 표의 셀 합치기는 엔진이 아직 지원하지 않습니다 (.hwpx 에서는 됩니다)' : '합칠 칸을 두 개 이상 고르세요: 칸을 누른 뒤 "칸→"·"칸↓" (키보드: F5 두 번 → 방향키)';
     return this.run(H.MERGE_SOURCE_TABLE_CELLS_COMMAND, m.target);
   }
   /** 셀 나누기: 지금 칸을 rows×cols 로 */
-  async splitCell(rows, cols) {
+  async _splitCell(rows, cols) {
     const sp = this.surface.captureSourceTableCellSplit?.();
     if (!sp) return '나눌 칸을 누르세요';
     return this.run(H.SPLIT_SOURCE_TABLE_CELLS_COMMAND, { target: sp.target, rows, columns: cols, mode: 'each', equalizeRows: true });
   }
   /** 칸 블록 시작(F5) */
   cellBlock(extend = false) { return this.surface.requestCellBlock?.(extend) || false; }
+  /**
+   * 칸 블록을 한 칸 넓히기 (키보드 없는 태블릿용): 한글처럼 F5 두 번(블록 넓히기 상태) 뒤 방향키.
+   * dir: 'ArrowRight'|'ArrowDown'|'ArrowLeft'|'ArrowUp'. 블록이 생기면 true
+   */
+  async extendCellBlock(dir) {
+    if (!this.surface.hasCellBlock?.() || !this._blockExtending) {
+      if (!this.surface.requestCellBlock?.(false)) return false;
+      this.surface.requestCellBlock?.(false);
+      this._blockExtending = true;
+    }
+    const ta = [...this.surface && document.querySelectorAll('.hwp-root textarea')][0];
+    const ev = { key: dir, code: dir, bubbles: true, cancelable: true, composed: true };
+    (ta || document.activeElement).dispatchEvent(new KeyboardEvent('keydown', ev));
+    (ta || document.activeElement).dispatchEvent(new KeyboardEvent('keyup', ev));
+    await new Promise((r) => setTimeout(r, 120));
+    return !!this.surface.hasCellBlock?.();
+  }
+
+  // ── 각주·미주 ──
+  /** 커서 자리에 각주('foot')·미주('end'), 본문 글 body */
+  async insertNote(kind, body) {
+    if (this.fileFormat === 'hwp5') return 'HWP(.hwp) 문서의 각주·미주 넣기는 엔진이 아직 지원하지 않습니다 (.hwpx 문서에서는 됩니다)';
+    return this.fresh(() => this._insertNote(kind, body));
+  }
+  async _insertNote(kind, body) {
+    await this.settle();
+    const st = this.state();
+    const caret = this.surface.captureInlineObjectInsertCaret?.();
+    if (!caret || caret.state !== st) return '주석을 넣을 자리에 커서를 놓으세요 (글자를 선택하지 말고)';
+    let target;
+    try { target = await this.editor.getInlineObjectInsertTarget(caret.selector, caret.unit, { affinity: caret.affinity ?? 'forward' }); }
+    catch (e) { return describe(e?.message || e); }
+    const c = this.state().content || {};
+    const res = c.tableCreationResources || {}, pol = c.noteShapes || { sections: 1, notes: [] };
+    const resources = { paragraph: res.paragraph?.[0], character: res.character?.[0], style: res.style?.[0] };
+    if (!Object.values(resources).every((id) => Number.isInteger(id) && id >= 0)) return '이 문서에는 주석에 쓸 기본 서식이 없어 넣을 수 없습니다';
+    const format = { number_type: 'DIGIT', user_char: '', prefix_char: '', suffix_char: ')', superscript: false };
+    const initial_policies = [];
+    for (let section = 0; section < pol.sections; section++) {
+      if (!pol.notes.some((p) => p.section_ordinal === section && p.kind === kind)) initial_policies.push({ section, shape: {
+        format, line_length: kind === 'foot' ? -1 : -4, line_type: 'SOLID', line_width: '0.12 mm', line_color: '#000000',
+        between_notes: kind === 'foot' ? 283 : 0, below_line: 567, above_line: 850, start: 1,
+        place: kind === 'foot' ? 'EACH_COLUMN' : 'END_OF_DOCUMENT', beneath_text: false } });
+    }
+    return this.insertWithCaret(kind === 'foot' ? H.INSERT_FOOTNOTE_COMMAND : H.INSERT_ENDNOTE_COMMAND,
+      { target, selectionVersion: this.state().stateVersion, options: { body, format, resources, initial_policies } });
+  }
+
+  // ── 수식 ──
+  /** 커서 자리에 수식. script 는 한글 수식 문법(예: {a} over {b}, sqrt {x}); LaTeX(\frac 등)도 기본 기호는 바꿔 줌 */
+  async insertEquation(script) {
+    return this.fresh(() => this._insertEquation2(script));
+  }
+  async _insertEquation2(script) {
+    await this.settle();
+    script = latexToHwpEq(String(script || '').trim());
+    if (!script) return '수식을 입력하세요';
+    const st = this.state();
+    let target = st.selection;
+    const av = H.getInlineObjectInsertAvailability?.(st, 'equation');
+    if (!av?.enabled || st.content?.format === 'hwpx') { // HWPX·표 칸 등: 위치 조회로 (HWPX 는 소유 위치를 함께 보내야 받음)
+      const caret = this.surface.captureInlineObjectInsertCaret?.();
+      if (!caret || caret.state !== st) return '수식을 넣을 자리에 커서를 놓으세요 (글자를 선택하지 말고)';
+      try { target = await this.editor.getInlineObjectInsertTarget(caret.selector, caret.unit, { affinity: caret.affinity ?? 'forward' }); }
+      catch (e) { return describe(e?.message || e); }
+      const av2 = H.getInlineObjectInsertAvailability?.(this.state(), 'equation', undefined, target);
+      if (!av2?.enabled) return describe(av2?.reason || av?.reason || 'InlineObjectInsertionUnavailable');
+    }
+    // 크기(HWPUNIT, 1pt=100): 엔진이 글로 크기를 재지 않으므로 대략 — 분수·위아래 첨자가 있으면 높게
+    const tall = /\bover\b|\batop\b|\bsum\b|\bint\b|\blim\b|\bmatrix\b|\bcases\b|\^|_/.test(script);
+    const plain = script.replace(/\b(over|sqrt|times|left|right|alpha|beta|gamma|theta|pi|sum|int|lim|rm|it)\b|[{}\s]/g, '');
+    const width = Math.max(1200, Math.round((plain.length + 1) * 550)), height = tall ? 3000 : 1600;
+    return this.insertWithCaret(H.INSERT_EQUATION_COMMAND, { target, selectionVersion: this.state().stateVersion,
+      options: { script, width, height, baseLine: tall ? 70 : 85, baseUnit: 1000, version: 'Equation Version 60', font: 'HYhwpEQ', ...(this.state().content?.format === 'hwp5' ? { colorRgb: 0, lineMode: false } : {}) } }); // 색·줄 모드는 HWP5 만
+  }
+  /** HWP5 문서의 기존 수식 목록 [{index, script?}] */
+  equations() {
+    try { return H.hwp5EquationScriptSources(this.state()).map((r, i) => ({ i, row: r })); } catch { return []; }
+  }
+  /** 기존 수식(HWP5) 고치기: row = equations()[k].row */
+  async readEquation(row) {
+    const sel = await this.editor.setSelection(H.createParagraphSelection(this.state(), { section: row.section, paragraph: row.paragraph, startUnit: row.unit, endUnit: row.unit + 1 }));
+    const cap = await this.editor.getHwp5EquationScript({ section: row.section, equationNode: row.equationNode, layout: 'version-only' }, { token: sel.token });
+    if (cap.state !== 'available') throw new Error(describe(cap.reason));
+    return cap;
+  }
+  async editEquation(cap, script) {
+    script = latexToHwpEq(String(script || '').trim());
+    if (!script) return '수식을 입력하세요';
+    return this.run(H.EDIT_HWP5_EQUATION_SCRIPT_COMMAND, { target: cap.target, script });
+  }
+  releaseEquation(cap) { if (cap) this.editor.releaseHwp5EquationScript(cap.target).catch(() => {}); }
 
   // ── 그림 ──
   /** 커서 자리에 그림 (PNG/JPEG 바이트, 픽셀 크기). 너무 크면 150mm 안으로 */
@@ -283,7 +403,7 @@ export class HwpSession {
       target = st.selection;
       if (!target || target.owner !== `section:${target.section}:body`) return '그림은 본문 문단에만 넣을 수 있습니다 (표 안·글상자 제외)';
     }
-    return this.run(H.INSERT_IMAGE_COMMAND, { target, selectionVersion: st.stateVersion, options: { imageBytes: bytes, width: w, height: h } });
+    return this.insertWithCaret(H.INSERT_IMAGE_COMMAND, { target, selectionVersion: st.stateVersion, options: { imageBytes: bytes, width: w, height: h } });
   }
 
   // ── 쪽 설정 ──
@@ -301,7 +421,7 @@ export class HwpSession {
    * 쪽 설정 바꾸기 (mm). scope 'section'|'document'.
    * 이번에 새로 넣은 표·그림이 있으면 엔진이 거절(PendingObjects) → 저장해 다시 연 뒤 적용 (실행 취소 기록은 비워짐)
    */
-  async setPageSettings(read, v, scope = 'document') {
+  async setPageSettings(read, v, scope = 'document', { confirmReload } = {}) {
     const u = (mm) => Math.round(mm * 7200 / 25.4);
     const values = { orientation: v.orientation, width: u(v.width), height: u(v.height), gutter_type: v.gutter_type, margin: Object.fromEntries(Object.entries(v.margin).map(([k, x]) => [k, u(x || 0)])) };
     const apply = async (target) => {
@@ -309,6 +429,7 @@ export class HwpSession {
     };
     let r = await apply(read.target);
     if (/PendingObjects/.test(r?.error || '')) {
+      if (confirmReload && !(await confirmReload())) return '취소했습니다';
       await this.reload();
       const again = await this.editor.getPageSettings();
       if (again.state !== 'available') return describe(again.reason);
@@ -329,10 +450,14 @@ export class HwpSession {
     const { bytes } = await this.save();
     return screenPages(bytes, scale);
   }
-  /** 지금 내용을 저장해 같은 편집기로 다시 열기 (엔진이 새 개체를 정리한 상태로) */
+  /** 지금 내용을 저장해 같은 편집기로 다시 열기 (엔진이 새 개체를 정리한 상태로). 본문 커서 자리는 유지 */
   async reload() {
+    const sel = this.state().selection;
     const { bytes } = await this.save();
     await this.editor.load(bytes, { format: this.fileFormat, editable: true });
+    if (sel && sel.owner === `section:${sel.section}:body`) {
+      try { await this.editor.setSelection(H.createParagraphSelection(this.state(), { section: sel.section, paragraph: sel.paragraph, startUnit: sel.startUnit, endUnit: sel.startUnit })); this.focus(); } catch { /* 커서는 다시 눌러야 함 */ }
+    }
   }
 
   // ── 클립보드 ──
@@ -342,12 +467,50 @@ export class HwpSession {
     return ok ? null : (cut ? '잘라내지 못했습니다' : '복사하지 못했습니다');
   }
 
-  async run(cmd, payload) {
+  /**
+   * 입력 직후에는 엔진이 '그사이 바뀜·조합 중'으로 거절할 수 있음 → 위치를 새로 읽어 몇 번 다시 (사용자가 다시 누를 필요 없게)
+   */
+  async fresh(fn) {
+    let why;
+    for (let i = 0; i < 4; i++) {
+      why = await fn();
+      if (!why || !/Stale|Mismatch|CompositionBlocked|그사이 바뀌었/.test(why)) return why;
+      await new Promise((r) => setTimeout(r, 200 + i * 150));
+    }
+    return why;
+  }
+  insertTable(...a) { return this.fresh(() => this._insertTable(...a)); }
+  tableGrid(...a) { return this.fresh(() => this._tableGrid(...a)); }
+  mergeCells(...a) { return this.fresh(() => this._mergeCells(...a)); }
+  splitCell(...a) { return this.fresh(() => this._splitCell(...a)); }
+  align(...a) { return this.fresh(() => this._align(...a)); }
+  insertImageFresh(...a) { return this.fresh(() => this.insertImage(...a)); }
+
+  /** 개체(수식·주석·그림·표)를 넣은 뒤 커서가 사라지면, 넣은 자리 바로 뒤에 커서를 다시 놓음 */
+  async caretAfter(before) {
+    if (!before || this.state().selection) return;
+    for (const d of [8, 1, 0]) { // 한글 문서의 개체 자리 = 보통 8 글자 단위
+      try {
+        await this.editor.setSelection(H.createParagraphSelection(this.state(), { section: before.section, paragraph: before.paragraph, startUnit: before.startUnit + d, endUnit: before.startUnit + d }));
+        if (this.state().selection) { this.focus(); return; }
+      } catch { /* 다음 후보 */ }
+    }
+  }
+  async insertWithCaret(cmd, payload) {
+    const before = this.state().selection;
+    const why = await this.run(cmd, payload);
+    if (!why && before && before.owner === `section:${before.section}:body`) await this.caretAfter(before);
+    return why;
+  }
+
+  async run(cmd, payload, tries = 0) {
     try {
       const r = await this.editor.dispatchCommand(cmd, payload);
+      if (tries < 6 && /CompositionBlocked/.test(r?.error || '')) { await new Promise((ok) => setTimeout(ok, 150)); await this.settle(); return this.run(cmd, payload, tries + 1); } // 입력 처리 중·한글 조합 중 → 잠깐 뒤 다시
       if (/^committed/.test(r?.status || '') || r?.status === 'known-no-op') return null;
       return describe(r?.error || r?.reason || r?.status);
     } catch (e) {
+      if (tries < 6 && /CompositionBlocked/.test(e?.message || '')) { await new Promise((ok) => setTimeout(ok, 150)); await this.settle(); return this.run(cmd, payload, tries + 1); }
       return describe(e?.message || e);
     }
   }
@@ -383,7 +546,7 @@ export class HwpSession {
 function describe(reason) {
   const r = String(reason || '').replace(/^(Error|RuntimeAdmissionRejected):\s*/, '');
   if (/ReadOnly/i.test(r)) return '읽기 전용 문서입니다';
-  if (/Stale/i.test(r)) return '문서가 그사이 바뀌었습니다. 다시 눌러 주세요';
+  if (/Stale|Mismatch/i.test(r)) return `문서가 그사이 바뀌었습니다. 다시 눌러 주세요 (${r})`;
   if (/Unavailable|Unsupported/i.test(r)) return `엔진이 이 위치·문서에서는 아직 지원하지 않습니다 (${r})`;
   return r ? `적용하지 못했습니다 (${r})` : '적용하지 못했습니다';
 }
@@ -452,6 +615,7 @@ function touchNavigation(root, session) {
     }
   };
   // 마우스·펜으로 눌러도 엔진의 글 입력 칸에 초점이 가지 않아 키보드 입력이 사라짐 → 누른 뒤 초점 주기
+  root.addEventListener('pointerdown', (e) => { if (e.isTrusted && !e.target.classList?.contains('hwp-ink')) { session.lastPoint = { x: e.clientX, y: e.clientY }; session._blockExtending = false; } }, true);
   const focusAfter = (e) => {
     if (e.pointerType === 'touch') return;
     setTimeout(() => { const a = document.activeElement; if (!(a?.tagName === 'TEXTAREA' && root.contains(a))) session.focus(); }, 0);
@@ -515,4 +679,17 @@ async function screenPages(bytes, scale = 2) {
     await s?.dispose();
     box.remove();
   }
+}
+
+/** LaTeX 기본 기호 → 한글 수식 문법 (이미 한글 문법이면 그대로) */
+export function latexToHwpEq(t) {
+  if (!/\\/.test(t)) return t;
+  let s = t;
+  for (let k = 0; k < 6; k++) s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '{$1} over {$2}');
+  s = s.replace(/\\sqrt\s*\[([^\]]*)\]\s*\{([^{}]*)\}/g, 'root {$1} of {$2}').replace(/\\sqrt\s*\{([^{}]*)\}/g, 'sqrt {$1}');
+  const map = { cdot: 'cdot', times: 'times', div: 'div', pm: '+-', mp: '-+', le: '<=', leq: '<=', ge: '>=', geq: '>=', ne: '!=', neq: '!=', approx: 'approx', infty: 'inf',
+    sum: 'sum', int: 'int', lim: 'lim', to: '->', rightarrow: '->', leftarrow: '<-', cdots: 'cdots', ldots: 'ldots', in: 'in', subset: 'subset', cup: 'cup', cap: 'cap',
+    sin: 'sin', cos: 'cos', tan: 'tan', log: 'log', ln: 'ln', left: 'left', right: 'right', quad: '~', qquad: '~~' };
+  s = s.replace(/\\([a-zA-Z]+)/g, (m, w) => (map[w] ?? (/^(alpha|beta|gamma|delta|epsilon|theta|lambda|mu|pi|sigma|phi|omega|Alpha|Beta|Gamma|Delta|Theta|Lambda|Pi|Sigma|Phi|Omega)$/.test(w) ? w : w)) + ' ');
+  return s.replace(/\s+/g, ' ').trim();
 }

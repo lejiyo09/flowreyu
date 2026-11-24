@@ -188,10 +188,15 @@
       <button data-hb="colAfter" class="txt" title="오른쪽에 열 추가">+열</button>
       <button data-hb="rowDel" class="txt" title="행 지우기">−행</button>
       <button data-hb="colDel" class="txt" title="열 지우기">−열</button>
-      <button data-hb="merge" class="txt" title="셀 합치기: 칸 여러 개를 선택한 뒤 (F5 → 방향키, 또는 끌기)">합치기</button>
+      <button data-hb="blockRight" class="txt" title="칸 블록을 오른쪽으로 한 칸 넓히기 (키보드: F5 두 번 → →)">칸→</button>
+      <button data-hb="blockDown" class="txt" title="칸 블록을 아래로 한 칸 넓히기 (키보드: F5 두 번 → ↓)">칸↓</button>
+      <button data-hb="merge" class="txt" title="셀 합치기 (HWPX): 칸→·칸↓ 로 칸을 고른 뒤">합치기</button>
       <button data-hb="split" class="txt" title="셀 나누기">나누기</button>
     </span>
     <button data-hb="image" class="txt" title="그림 넣기 (본문 문단에)">그림</button>
+    <button data-hb="equation" class="txt" title="수식 넣기·고치기 (한글 수식 문법, LaTeX 기본 기호도 됨)">수식</button>
+    <button data-hb="footnote" class="txt" title="각주 넣기 (커서 자리)">각주</button>
+    <button data-hb="endnote" class="txt" title="미주 넣기 (커서 자리)">미주</button>
     <button data-hb="page" class="txt" title="쪽 설정: 용지 크기·방향·여백">쪽 설정</button>
     <button data-hb="find" class="txt" title="찾기·바꾸기 (Ctrl+F · Ctrl+H)">찾기</button>
     <span class="fb-sep"></span>
@@ -708,6 +713,24 @@
     <div class="row"><span>적용 범위</span><select id="hpScope"><option value="document">문서 전체</option><option value="section">현재 구역</option></select></div>
     </div>
     <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">적용</button></footer>
+  </form>
+</dialog>
+<dialog id="hwpEqDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner" novalidate>
+    <header class="dlg-head"><h2>수식</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body">
+      <div class="row" id="heWhichRow"><span>대상</span><select id="heWhich"><option value="new">새 수식 넣기 (커서 자리)</option></select></div>
+      <textarea id="heScript" rows="4" placeholder="예: {a} over {b} + sqrt {x^2+1}   또는 LaTeX: \frac{a}{b} + \sqrt{x^2+1}" spellcheck="false" data-gramm="false"></textarea>
+      <p class="muted small">한글 수식 문법: 분수 <code>{a} over {b}</code>, 제곱근 <code>sqrt {x}</code>, 위·아래 첨자 <code>x^2</code> <code>a_n</code>, 합 <code>sum _{i=1} ^n</code>. LaTeX 의 \frac·\sqrt·그리스 문자 등은 자동으로 바꿉니다.</p>
+    </div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">적용</button></footer>
+  </form>
+</dialog>
+<dialog id="hwpNoteDlg" class="dlg small-dlg">
+  <form method="dialog" class="dlg-inner" novalidate>
+    <header class="dlg-head"><h2 id="hnTitle">각주</h2><button class="icon-btn" value="cancel" title="닫기"><svg><use href="#i-close"/></svg></button></header>
+    <div class="dlg-body"><textarea id="hnBody" rows="4" placeholder="주석 내용" data-gramm="false"></textarea></div>
+    <footer class="dlg-foot"><button class="btn" value="cancel">취소</button><button class="btn primary" value="ok">넣기</button></footer>
   </form>
 </dialog>
 <input type="file" id="hwpImageInput" accept="image/png,image/jpeg" hidden>

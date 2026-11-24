@@ -697,3 +697,5 @@ input[type=range] { accent-color: var(--accent); }
 .search-replace { display: flex; gap: 4px; align-items: center; flex-basis: 100%; margin-top: 4px; }
 .search-replace[hidden] { display: none; }
 .search-replace input { flex: 1; min-width: 80px; }
+#heScript, #hnBody { width: 100%; box-sizing: border-box; font: 14px/1.5 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--surface-2); color: inherit; }
+#hnBody { font-family: inherit; }
