@@ -1177,6 +1177,7 @@ function typingPages(n) {
 function typingChanged() {
   if (!typing) return;
   typing.dirty = true;
+  if (!$('#searchBar').hidden && $('#searchInput').value) searchSoon(); // 찾기 중 글이 바뀌면 결과 다시 (보던 자리 유지)
   const src = typing.meta.source;
   if (src?.unchanged) { src.unchanged = false; store.patchDoc(typing.meta.id, { source: src }).catch(() => {}); }
   renderSaveState();
@@ -3310,6 +3311,7 @@ function closeSearch() {
   $('#btnSearch').classList.remove('on');
   searchHits = []; searchCur = -1;
   if (viewer.search) { viewer.search = null; viewer.requestInk(); }
+  if (typing && typingFind.hits.length) { typingFind = { hits: [], cur: -1 }; typingMod.setSearchHits(typing.ed.editor, []); }
   $('#searchInput').blur();
 }
 const searchSoon = debounce(() => runSearch({ keepPlace: true }), 250);
@@ -3329,6 +3331,7 @@ async function pageTextIndex(i) {
 /** 모든 페이지를 차례로 찾는다 (긴 PDF 도 화면이 멈추지 않게 나눠서, 찾는 중에도 개수가 늘어남) */
 async function runSearch({ keepPlace = false } = {}) {
   if (hwp) return hwpRunSearch();
+  if (typing) return typingRunSearch(keepPlace);
   const job = ++searchJob, d = state.doc;
   const q = prepQuery($('#searchInput').value);
   const prevCur = searchHits[searchCur];
@@ -3388,6 +3391,7 @@ function showSearchHit(move) {
 }
 function stepSearch(dir) {
   if (hwp) { hwpFind(dir > 0 ? 'forward' : 'backward'); return; }
+  if (typing) { typingStepSearch(dir); return; }
   if (!searchHits.length) { runSearch(); return; }
   searchCur = (searchCur + dir + searchHits.length) % searchHits.length;
   showSearchHit(true);
@@ -3395,6 +3399,47 @@ function stepSearch(dir) {
 }
 
 $('#btnSearch').addEventListener('click', () => ($('#searchBar').hidden ? openSearch() : closeSearch()));
+
+// 타이핑형·Word 문서 본문 찾기: 편집기 글에서 (찾은 곳 노랑, 지금 결과 주황), 결과로 화면 이동
+let typingFind = { hits: [], cur: -1 };
+function typingRunSearch(keepPlace) {
+  const ed = typing.ed.editor, count = $('#searchCount');
+  const q = prepQuery($('#searchInput').value);
+  count.classList.remove('none');
+  const hits = q ? typingMod.findText(ed.state.doc, q) : [];
+  let cur = -1;
+  if (hits.length) {
+    if (keepPlace && typingFind.hits[typingFind.cur]) { const was = typingFind.hits[typingFind.cur].from; cur = hits.findIndex((x) => x.from >= was); }
+    else { const at = ed.state.selection.from; cur = hits.findIndex((x) => x.from >= at); } // 커서 뒤 첫 결과부터
+    if (cur < 0) cur = 0;
+  }
+  typingFind = { hits, cur };
+  typingMod.setSearchHits(ed, hits, cur);
+  if (!q) count.textContent = '';
+  else if (!hits.length) { count.textContent = '없음'; count.classList.add('none'); }
+  else { count.textContent = `${cur + 1} / ${hits.length}`; if (!keepPlace) revealTypingPos(hits[cur].from); }
+}
+function typingStepSearch(dir) {
+  const { hits } = typingFind;
+  if (!hits.length) { typingRunSearch(false); return; }
+  const cur = (typingFind.cur + dir + hits.length) % hits.length;
+  typingFind.cur = cur;
+  typingMod.setSearchHits(typing.ed.editor, hits, cur);
+  $('#searchCount').textContent = `${cur + 1} / ${hits.length}`;
+  revealTypingPos(hits[cur].from);
+}
+/** 문서 위치가 화면 안(찾기 막대·도구 모음에 가리지 않게)에 오도록 화면 이동 */
+function revealTypingPos(pos) {
+  let c;
+  try { c = typing.ed.editor.view.coordsAtPos(pos); } catch { return; }
+  const vr = $('#viewport').getBoundingClientRect();
+  const top = vr.top + viewer.insetTop + 70, bottom = vr.bottom - 90;
+  let dy = 0, dx = 0;
+  if (c.top < top || c.bottom > bottom) dy = c.top - (top + (bottom - top) / 3);
+  if (c.left < vr.left + 16) dx = c.left - vr.left - 40;
+  else if (c.right > vr.right - 16) dx = c.right - vr.right + 40;
+  if (dx || dy) viewer.setCamera(viewer.cam.tx - dx, viewer.cam.ty - dy, viewer.cam.z);
+}
 
 // 한글 문서 찾기·바꾸기: 엔진의 문서 전체 색인으로 (찾으면 문서에서 그 글자를 선택)
 let hwpSearchJob = 0;

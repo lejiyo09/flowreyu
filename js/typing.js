@@ -268,6 +268,62 @@ const SelectKeys = Extension.create({
   },
 });
 
+/**
+ * 글자 찾기(Ctrl+F) 표시: 찾은 곳은 노랑, 지금 결과는 주황. 문서 내용은 바꾸지 않음 (장식만)
+ */
+const searchKey = new PluginKey('typingSearch');
+const SearchHighlight = Extension.create({
+  name: 'searchHighlight',
+  addProseMirrorPlugins() {
+    return [new Plugin({
+      key: searchKey,
+      state: {
+        init: () => ({ hits: [], cur: -1, deco: DecorationSet.empty }),
+        apply(tr, v, _old, st) {
+          const m = tr.getMeta(searchKey);
+          if (m) {
+            const deco = DecorationSet.create(st.doc, m.hits.map((h, i) => Decoration.inline(h.from, h.to, { class: i === m.cur ? 'find-hit cur' : 'find-hit' })));
+            return { hits: m.hits, cur: m.cur, deco };
+          }
+          if (tr.docChanged) return { ...v, deco: v.deco.map(tr.mapping, tr.doc) };
+          return v;
+        },
+      },
+      props: { decorations: (st) => searchKey.getState(st).deco },
+    })];
+  },
+});
+
+/**
+ * 문서에서 글 찾기 → [{from, to}] (공백·대소문자 무시: PDF 찾기와 같은 규칙. 문단을 넘어가지는 않음)
+ * q 는 search.js prepQuery 로 다듬은 검색어
+ */
+export function findText(doc, q) {
+  const out = [];
+  if (!q) return out;
+  doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true;
+    const chars = []; // [글자, 문서 위치]
+    node.forEach((child, off) => {
+      const at = pos + 1 + off;
+      if (child.isText) { let i = 0; for (const ch of child.text) { if (!/\s/.test(ch)) chars.push([ch.normalize('NFC').toLowerCase(), at + i, ch.length]); i += ch.length; } }
+    });
+    // 글자마다 길이가 1 이 아닐 수 있어(서로게이트) 글자 단위로 비교
+    const qs = [...q], hs = chars.map((c) => c[0]);
+    for (let i = 0; i + qs.length <= hs.length; i++) {
+      let ok = true;
+      for (let k = 0; k < qs.length; k++) if (hs[i + k] !== qs[k]) { ok = false; break; }
+      if (ok) { const last = chars[i + qs.length - 1]; out.push({ from: chars[i][1], to: last[1] + last[2] }); i += qs.length - 1; }
+    }
+    return false;
+  });
+  return out;
+}
+/** 찾은 곳 표시 (cur = 지금 결과 번호, 없으면 -1). hits 가 비면 표시 지움 */
+export function setSearchHits(editor, hits, cur = -1) {
+  editor.view.dispatch(editor.state.tr.setMeta(searchKey, { hits, cur }).setMeta('addToHistory', false));
+}
+
 /** 탭 문자 (가져온 문서의 탭. 채움선 문단에서는 남은 폭을 채움) */
 const Tab = Node.create({
   name: 'tab',
@@ -429,7 +485,7 @@ export function createEditor(host, o) {
         inlineOptions: { onClick: (node, pos) => o.onMathEdit?.(node, pos, 'inline') },
         blockOptions: { onClick: (node, pos) => o.onMathEdit?.(node, pos, 'block') },
       }),
-      PageBreak, ParagraphFormat, Tab, TableFormat, SelectKeys,
+      PageBreak, ParagraphFormat, Tab, TableFormat, SelectKeys, SearchHighlight,
       Extension.create({ name: 'pagination', addProseMirrorPlugins: () => [paginationPlugin(() => g, (n) => o.onPages?.(n))] }),
     ],
     // data-gramm 등: Grammarly 같은 확장이 붙지 않게 — 문서가 확대·이동(CSS 변환)되므로 확장이 그리는 밑줄이 엉뚱한 곳에 뜸
