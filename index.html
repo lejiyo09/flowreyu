@@ -15,6 +15,7 @@
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
+    <symbol id="i-paper" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5z" fill="currentColor"/></symbol>
     <symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20l1.2-4.6L15.8 4.8a2 2 0 0 1 2.8 0l.6.6a2 2 0 0 1 0 2.8L8.6 18.8 4 20z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M13.8 6.8l3.4 3.4" stroke="currentColor" stroke-width="1.7"/></symbol>
     <symbol id="i-hl" viewBox="0 0 24 24"><path d="M9 14l-3 3v3h3l3-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 14l7.5-9.5a1.8 1.8 0 0 1 2.6-.2l1 1a1.8 1.8 0 0 1-.2 2.6L12 17z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M3 21h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
     <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M8.5 19.5l-4.3-4.3a2 2 0 0 1 0-2.8l8.6-8.6a2 2 0 0 1 2.8 0l4.4 4.4a2 2 0 0 1 0 2.8l-7.5 8.5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 9.5l6.5 6.5M8.5 19.5H20" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></symbol>
@@ -109,6 +110,7 @@
       <select class="surf-bg" id="surfBg" title="배경 무늬" hidden><option value="blank">무지</option><option value="lined">줄</option><option value="grid">모눈</option><option value="dot">점</option></select>
       <button class="icon-btn" id="btnDebug" title="입력 로그" hidden><svg><use href="#i-bug"/></svg></button>
       <button class="icon-btn" id="btnSearch" title="글자 찾기 (Ctrl+F)"><svg><use href="#i-search"/></svg></button>
+      <button class="icon-btn" id="btnPaper" title="흑백 반전: 검은 종이·흰 글씨로 보기 (다른 색은 그대로, 인쇄·내보내기는 원래대로)"><svg><use href="#i-paper"/></svg></button>
       <button class="icon-btn" id="btnClock" title="스톱워치·타이머"><svg><use href="#i-clock"/></svg></button>
       <button class="icon-btn" id="btnLayers" title="레이어"><svg><use href="#i-layers"/></svg></button>
       <button class="icon-btn" id="btnAi" title="AI 도우미 (회의록·맞춤법·번역)"><svg><use href="#i-ai"/></svg></button>
@@ -130,6 +132,7 @@
     <button data-fb="superscript" title="위첨자">x²</button>
     <button data-fb="subscript" title="아래첨자">x₂</button>
     <label class="fb-color" title="글자색"><span class="fb-a">가</span><input type="color" id="fbColor" value="#c62828"></label>
+    <span class="fb-presets" id="fbPresets" title="글자색 프리셋: 누르면 그 색으로 칠하고 Ctrl+K 색으로 정함 · 길게 누르거나 오른쪽 클릭하면 색 바꾸기"></span>
     <label class="fb-color hl" title="형광 배경"><span class="fb-a">가</span><input type="color" id="fbHl" value="#fff176"></label>
     <span class="fb-sep"></span>
     <button data-fb="left" title="왼쪽 정렬">⯇</button>

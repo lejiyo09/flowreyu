@@ -707,3 +707,35 @@ input[type=range] { accent-color: var(--accent); }
 .tools button[data-mode="line"]::after, .tools button[data-mode="shape"]::after { position: absolute; right: 2px; bottom: 1px; font-size: 10px; font-weight: 800; line-height: 1; color: var(--accent); }
 .tools button[data-mode="line"]::after { content: "╱"; }
 .tools button[data-mode="shape"]::after { content: "△"; }
+
+/* ── 흑백 반전(어두운 종이): 흰 종이·검은 글씨 → 검은 종이·흰 글씨, 다른 색은 그대로 (인쇄·내보내기는 원래대로) ── */
+#editor.paper-dark .page { background: #141414; }
+/* PDF 쪽 그림: 밝기만 뒤집고 색상(빨강·파랑…)은 유지 */
+#editor.paper-dark .page:not(.surface-page) canvas { filter: invert(1) hue-rotate(180deg); }
+#editor.paper-dark #cvBg { filter: invert(1) hue-rotate(180deg); }
+/* 형광펜: 어두운 바탕에서는 '곱하기' 대신 '스크린'이라야 보임 */
+#editor.paper-dark .layer.hl { mix-blend-mode: screen; opacity: 0.55; } /* 흰 글씨가 읽히게 조금 옅게 */
+#editor.paper-dark #cvLive.hl-live { mix-blend-mode: screen !important; }
+/* 타이핑형·Word: 종이·기본 글자색, 직접 지정한 검정·흰색만 바꿈 */
+#editor.paper-dark .typing-page { background: #141414; }
+#editor.paper-dark .typing-host { color: #ececec; }
+/* 글자색은 span 의 color 만 (칸의 border-color 같은 다른 속성은 건드리지 않게) */
+#editor.paper-dark .typing-doc span:is([style^="color: rgb(0, 0, 0)"], [style*="; color: rgb(0, 0, 0)"], [style^="color: #000"], [style*="; color: #000"], [style^="color: rgb(17, 17, 17)"], [style*="; color: rgb(17, 17, 17)"], [style^="color: #111"]) { color: #ececec !important; }
+#editor.paper-dark .typing-doc span:is([style^="color: rgb(255, 255, 255)"], [style*="; color: rgb(255, 255, 255)"], [style^="color: #fff"], [style*="; color: #fff"]) { color: #141414 !important; }
+#editor.paper-dark .typing-doc table td, #editor.paper-dark .typing-doc table th { border-color: #9a9a9a; }
+#editor.paper-dark .typing-doc :is(td, th)[style*="border-color: rgb(0, 0, 0)"] { border-color: #9a9a9a !important; } /* 검은 칸 선 → 밝은 회색 */
+/* 색 칠한 칸·형광 배경 위는 검은 글씨 (읽히게) */
+#editor.paper-dark .typing-doc :is(td, th)[style*="background"], #editor.paper-dark .typing-doc mark { color: #111; }
+#editor.paper-dark .typing-doc :is(td, th)[style*="background"] span:is([style^="color: rgb(0, 0, 0)"], [style*="; color: rgb(0, 0, 0)"], [style^="color: #000"], [style^="color: rgb(17, 17, 17)"], [style^="color: #111"]),
+#editor.paper-dark .typing-doc mark span:is([style^="color: rgb(0, 0, 0)"], [style^="color: #000"], [style^="color: #111"]) { color: #111 !important; }
+#editor.paper-dark .typing-doc hr { border-color: #777; }
+#editor.paper-dark .typing-page .pg-num, #editor.paper-dark .typing-page .pg-head { color: #bbb; }
+/* 한글 문서: 엔진 화면을 밝기만 뒤집음 */
+#editor.paper-dark .hwp-root canvas:not(.hwp-ink) { filter: invert(1) hue-rotate(180deg); }
+#editor.paper-dark .hwp-host { background: #2a2d33; }
+
+/* 글자색 프리셋 (Ctrl+K) */
+.fb-presets { display: inline-flex; gap: 3px; align-items: center; margin: 0 2px; flex: none; }
+.fb-presets button { min-width: 20px; width: 20px; height: 20px; padding: 0; border-radius: 50%; border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); }
+.fb-presets button.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--surface) inset; }
+#btnPaper.on { color: var(--accent); background: var(--accent-soft); }

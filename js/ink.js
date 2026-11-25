@@ -218,11 +218,38 @@ export function strokeRunPaths(ctx, runs, color) {
 
 /** ctx는 이미 페이지 좌표계로 변환되어 있어야 한다 */
 /** opts.print: PDF 내보내기용 (화면 전용 손잡이는 그리지 않음) */
+/**
+ * 흑백 반전(어두운 종이) 표시: 검은색에 가까운 필기·글은 흰색으로, 흰색에 가까운 것은 검은색으로 보여 줌.
+ * 그 밖의 색(빨강·파랑…)은 그대로. 저장·인쇄·내보내기는 원래 색 (opts.print 이면 바꾸지 않음)
+ */
+export const inkTheme = { dark: false };
+const lumCache = new Map();
+function luminance(c) {
+  if (lumCache.has(c)) return lumCache.get(c);
+  let v = 0.5;
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c || '');
+  if (m) {
+    const hx = m[1].length === 3 ? m[1].split('').map((x) => x + x).join('') : m[1];
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hx.slice(i, i + 2), 16) / 255);
+    v = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  lumCache.set(c, v);
+  return v;
+}
+export function displayColor(c) {
+  if (!inkTheme.dark || !c) return c;
+  const l = luminance(c);
+  if (l < 0.18) return '#f2f2f2';
+  if (l > 0.94) return '#141414';
+  return c;
+}
+
 export function drawItem(ctx, item, opts) {
+  const col = opts?.print ? item.c : displayColor(item.c);
   if (item.t === 's') {
-    strokeRunPaths(ctx, itemPath(item), item.c);
+    strokeRunPaths(ctx, itemPath(item), col);
   } else if (item.t === 'sh') {
-    ctx.strokeStyle = item.c;
+    ctx.strokeStyle = col;
     ctx.lineWidth = item.w;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -246,7 +273,7 @@ export function drawItem(ctx, item, opts) {
     drawTable(ctx, item, opts);
   } else if (item.t === 'tx') {
     const L = textLayout(item);
-    ctx.fillStyle = item.c;
+    ctx.fillStyle = col;
     ctx.font = fontOf(item);
     ctx.textBaseline = 'top';
     for (let i = 0; i < L.lines.length; i++) {

@@ -18,7 +18,7 @@ import { FONTS, MARGINS, DEFAULT_PAGE, pageGeom } from './typing-page.js';
 import { groupItems, ungroupItems, groupInfo, reorder, alignItems, selectionUnits, nudgeItems, cloneItems } from './arrange.js';
 import { ScrollEngine, contentBottom } from './scroll-engine.js';
 import { uid, debounce, formatBytes, formatDate, escapeHtml, clamp, rectsIntersect } from './util.js';
-import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest, linkHit, inactiveIds } from './ink.js';
+import { sanitizeItem, TEXT_FONT, textLayout, imageHooks, putImage, NOTE_COLORS, NOTE_PAD, TEXT_LINE, noteIconRect, noteFoldButton, noteDeleteButton, noteAttached, noteHandle, noteTextTop, noteTextBottom, noteResizeHandle, noteMinSize, bbox, checkHeight, tableCtlSize, tableAddRowBtn, tableAddColBtn, tableResizeHandle, tableMinSize, objHandle, objDeleteButton, objBarH, transformItem, drawItem, isHighlighter, foldHidden, layerSorted, layerUsable, layerHidden, setLayerState, layerOf, DEFAULT_LAYER, checkRowAt, checkBox, checkRowH, cellAt, cellRect, tableSize, hitTest, linkHit, inactiveIds, inkTheme } from './ink.js';
 
 const $ = (s) => document.querySelector(s);
 const APP_VERSION = '1.4.1';
@@ -1258,6 +1258,98 @@ function keepCaretVisible() {
   if (dx || dy) viewer.setCamera(viewer.cam.tx - dx, viewer.cam.ty - dy, viewer.cam.z);
 }
 window.visualViewport?.addEventListener('resize', () => { if (typing) keepCaretVisible(); });
+
+// ── 흑백 반전(어두운 종이) ──
+function applyPaper() {
+  const dark = !!settings.get('paperDark');
+  if (inkTheme.dark === dark && $('#editor').classList.contains('paper-dark') === dark) return;
+  inkTheme.dark = dark;
+  $('#editor').classList.toggle('paper-dark', dark);
+  $('#btnPaper').classList.toggle('on', dark);
+  viewer.requestInk(true);
+}
+$('#btnPaper').addEventListener('click', () => {
+  settings.set('paperDark', !settings.get('paperDark'));
+  toast(settings.get('paperDark') ? '흑백 반전: 검은 종이·흰 글씨 (다른 색은 그대로 · 인쇄·내보내기는 원래대로)' : '흰 종이로 보기', { ms: 2600 });
+});
+settings.on('change', ({ path }) => { if (path === 'paperDark' || path === '*') applyPaper(); });
+applyPaper();
+
+// ── 글자색 프리셋 + Ctrl+K (타이핑형·Word) ──
+function renderColorPresets() {
+  const box = $('#fbPresets'), cols = settings.get('typingColors'), act = settings.get('typingColorActive');
+  box.innerHTML = '';
+  cols.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.style.background = c;
+    b.dataset.i = i;
+    b.className = i === act ? 'active' : '';
+    b.title = `${c}${i === act ? ' · Ctrl+K 색' : ''} — 누르면 칠하기, 길게 누르면 색 바꾸기`;
+    box.appendChild(b);
+  });
+}
+/** 프리셋 색 칠하기. toggle: 이미 그 색이면 색 지우기 (Ctrl+K 를 한 번 더) */
+function applyPresetColor(i, toggle = false) {
+  const ed = typing?.ed.editor;
+  if (!ed) return;
+  const c = settings.get('typingColors')[i];
+  const cur = (ed.getAttributes('textStyle').color || '').toLowerCase();
+  const chain = ed.chain().focus(undefined, { scrollIntoView: false });
+  if (toggle && cur === c.toLowerCase()) chain.unsetColor().run(); else chain.setColor(c).run();
+  $('#fbColor').value = c;
+  $('#fbColor').parentNode.style.setProperty('--fbc', c);
+}
+function editPreset(i) {
+  const inp = document.createElement('input');
+  inp.type = 'color';
+  inp.value = settings.get('typingColors')[i];
+  inp.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0';
+  document.body.appendChild(inp);
+  inp.addEventListener('change', () => {
+    const cols = [...settings.get('typingColors')];
+    cols[i] = inp.value;
+    settings.set('typingColors', cols);
+    settings.set('typingColorActive', i);
+    renderColorPresets(); // 프리셋만 바꿈 (선택한 글은 그대로 — 칠하려면 누르거나 Ctrl+K)
+    inp.remove();
+  });
+  inp.addEventListener('blur', () => setTimeout(() => inp.remove(), 300));
+  inp.click();
+}
+{
+  const box = $('#fbPresets');
+  let hold = 0, held = false;
+  box.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    e.preventDefault(); // 글 선택이 풀리지 않게
+    held = false;
+    clearTimeout(hold);
+    hold = setTimeout(() => { held = true; editPreset(+b.dataset.i); }, 550);
+  });
+  box.addEventListener('pointerup', () => clearTimeout(hold));
+  box.addEventListener('pointerleave', () => clearTimeout(hold));
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b || held) return;
+    settings.set('typingColorActive', +b.dataset.i);
+    renderColorPresets();
+    applyPresetColor(+b.dataset.i);
+  });
+  box.addEventListener('contextmenu', (e) => { const b = e.target.closest('button'); if (!b) return; e.preventDefault(); clearTimeout(hold); editPreset(+b.dataset.i); });
+  renderColorPresets();
+}
+// Ctrl+K: 지금 프리셋 색으로 (다시 누르면 색 지우기). 편집기 안에서만 — 다른 곳의 K 는 링크 도구 그대로
+document.addEventListener('keydown', (e) => {
+  if (!typing || !(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 'k') return;
+  if (!e.target.closest?.('.typing-doc')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.shiftKey) { // Ctrl+Shift+K: 다음 프리셋으로 바꿔 칠하기
+    settings.set('typingColorActive', (settings.get('typingColorActive') + 1) % 5);
+    renderColorPresets();
+  }
+  applyPresetColor(settings.get('typingColorActive'), !e.shiftKey);
+}, true);
 
 // ── 서식 도구 모음 ──
 (function buildFmtBar() {
@@ -2850,9 +2942,9 @@ async function pageImageBase64(i) {
   const s = c.width / p.w;
   ctx.setTransform(s, 0, 0, s, 0, 0);
   ctx.globalCompositeOperation = 'multiply';
-  for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it);
+  for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it, { print: true });
   ctx.globalCompositeOperation = 'source-over';
-  for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it);
+  for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it, { print: true });
   return c.toDataURL('image/jpeg', 0.88).split(',')[1]; // PNG 는 사진 많은 PDF 에서 이미지 한도(5MB)를 넘을 수 있음
 }
 
@@ -2872,9 +2964,9 @@ function surfaceImageBase64() {
   const folded = foldHidden(items);
   const vis = items.filter((it) => !folded?.has(it.id) && rectsIntersect(bbox(it), box));
   ctx.globalCompositeOperation = 'multiply';
-  for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it);
+  for (const it of vis) if (isHighlighter(it)) drawItem(ctx, it, { print: true });
   ctx.globalCompositeOperation = 'source-over';
-  for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it);
+  for (const it of vis) if (!isHighlighter(it)) drawItem(ctx, it, { print: true });
   return c.toDataURL('image/jpeg', 0.88).split(',')[1];
 }
 

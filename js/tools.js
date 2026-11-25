@@ -3,7 +3,7 @@
 import { settings } from './settings.js';
 import {
   widthBucket, pressureFactor, roundPts, simplifyPts, hitTestSweep, eraseStrokePart,
-  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES, inactiveIds, layerUsable, noteAttached,
+  insideLasso, bbox, transformItem, shapePolylines, hitTest, OBJECT_TYPES, inactiveIds, layerUsable, noteAttached, displayColor, inkTheme,
 } from './ink.js';
 import { uid, dist, now } from './util.js';
 import { expandGroups, cloneItems } from './arrange.js';
@@ -222,7 +222,7 @@ class PenTool {
     // 자/각도기에 붙은 획은 이미 정확한 선 위에 있으므로 평활화하지 않는다 (호가 안쪽으로 줄어드는 것 방지)
     c.smooth = ev.snapped ? 0 : Math.min(settings.get('smoothing'), 10) * 0.065; // 0 ~ 0.65
     c.minStep = 0.35 / v.cam.z; // 화면 0.35px 미만 이동은 무시
-    v.liveCanvas.style.mixBlendMode = this.kind === 'hl' ? 'multiply' : 'normal';
+    v.liveCanvas.style.mixBlendMode = this.kind === 'hl' ? (inkTheme.dark ? 'screen' : 'multiply') : 'normal'; // 어두운 종이에서는 곱하기로 안 보임
     // 펜 모드: free(자유) | line(직선: 시작점~끝점, 떼기 전까지 끝점 조절) | shape(도형: 뗄 때 인식해 정돈). 자/각도기에 붙으면 자유
     c.mode = ev.snapped ? 'free' : (cfg.mode || 'free');
     if (c.mode === 'line') c.smooth = 0;
@@ -239,7 +239,7 @@ class PenTool {
     v.pageTransform(ctx, p);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, p.w, p.h); ctx.clip();
-    ctx.strokeStyle = c.color; ctx.lineWidth = c.width; ctx.lineCap = 'round';
+    ctx.strokeStyle = displayColor(c.color); ctx.lineWidth = c.width; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(c.lx1, c.ly1); ctx.lineTo(c.lx2, c.ly2); ctx.stroke();
     ctx.restore();
   }
@@ -304,7 +304,7 @@ class PenTool {
     v.pageTransform(ctx, p);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, p.w, p.h); ctx.clip();
-    ctx.strokeStyle = ctx.fillStyle = c.color;
+    ctx.strokeStyle = ctx.fillStyle = displayColor(c.color);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const r of c.runs) {
       if (r.count === 1) { ctx.beginPath(); ctx.arc(r.x, r.y, r.w / 2, 0, Math.PI * 2); ctx.fill(); continue; }
@@ -653,7 +653,7 @@ class ShapeTool {
     v.clearLive();
     const p = v.pages[c.page];
     v.pageTransform(ctx, p);
-    ctx.strokeStyle = c.color;
+    ctx.strokeStyle = displayColor(c.color);
     ctx.lineWidth = c.width;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath();

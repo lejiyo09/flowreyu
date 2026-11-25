@@ -48,6 +48,9 @@ export const GESTURES = [
 export const DEFAULTS = {
   theme: 'system', // system | light | dark
   glass: false, // 글래스모피즘 디자인 (반투명 패널 + 배경 흐림)
+  paperDark: false, // 흑백 반전: 검은 종이·흰 글씨로 보기 (PDF·필기·타이핑·한글, 인쇄·내보내기는 원래대로)
+  typingColors: ['#c62828', '#1e63d6', '#2e7d32', '#ef6c00', '#6a1b9a'], // 타이핑형·Word 글자색 프리셋
+  typingColorActive: 0, // Ctrl+K 로 칠할 프리셋 번호
   exportGallery: false, // PDF 내보내기: 필기를 크롬북 갤러리에서도 편집 가능한 모양으로
   glassClear: 45,
   toolbar: { dock: 'bottom', vertical: false, x: 0, y: 0 }, // 도구 모음 위치: bottom | top | left | right | float(x,y: 편집 화면 기준 px) // 글래스 투명도 % (0 = 불투명, 90 = 거의 투명)
@@ -145,6 +148,9 @@ function sanitize(s) {
   s.penGuardMs = clamp(+s.penGuardMs, 0, 2000);
   s.pen.width = clamp(+s.pen.width || 2, 0.3, 30);
   s.hl.width = clamp(+s.hl.width || 14, 2, 60);
+  if (!Array.isArray(s.typingColors) || s.typingColors.length !== 5 || !s.typingColors.every((c) => /^#[0-9a-f]{6}$/i.test(c))) s.typingColors = [...DEFAULTS.typingColors];
+  s.typingColorActive = clamp(Math.round(+s.typingColorActive) || 0, 0, 4);
+  s.paperDark = !!s.paperDark;
   for (const k of ['pen', 'hl']) if (!['free', 'line', 'shape'].includes(s[k].mode)) s[k].mode = 'free';
   s.eraser.size = clamp(+s.eraser.size || 16, 4, 120);
   s.shape.width = clamp(+s.shape.width || 2, 0.3, 30);

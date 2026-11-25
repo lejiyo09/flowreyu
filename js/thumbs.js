@@ -128,9 +128,9 @@ export class ThumbPanel {
     ctx.globalCompositeOperation = 'multiply';
     const folded = foldHidden(items);
     const vis = folded ? items.filter((it) => !folded.has(it.id)) : items;
-    for (const item of vis) if (isHighlighter(item)) drawItem(ctx, item);
+    for (const item of vis) if (isHighlighter(item)) drawItem(ctx, item, { print: true });
     ctx.globalCompositeOperation = 'source-over';
-    for (const item of vis) if (!isHighlighter(item)) drawItem(ctx, item);
+    for (const item of vis) if (!isHighlighter(item)) drawItem(ctx, item, { print: true });
   }
 
   clear() { this.io.disconnect(); this.list.innerHTML = ''; this.items = []; this.pdfCache.clear(); this.queue.clear(); this.cur = -1; }

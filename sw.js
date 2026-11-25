@@ -7,7 +7,7 @@
 //   (실행 중에 코드가 섞이지 않도록 자동 교체는 하지 않는다)
 
 // <precache> (tools/gen-sw.js 가 생성 — 직접 고치지 말 것)
-const VERSION = '2fcbddd3edad';
+const VERSION = '763adf1a5d45';
 const LAZY_VERSION = '192e6e09caf0'; // vendor/hwpjs/ (처음 쓸 때 받음)
 const PRECACHE = [
   "./",
