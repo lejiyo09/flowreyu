@@ -75,8 +75,8 @@ export const DEFAULTS = {
 
   // 도구별 설정
   tool: 'pen',
-  pen: { color: '#111111', width: 2.2, recent: ['#111111', '#e53935', '#1e63d6'] },
-  hl: { color: '#fff176', width: 14, recent: ['#fff176', '#a5f3a1', '#9fd8ff'] },
+  pen: { color: '#111111', width: 2.2, recent: ['#111111', '#e53935', '#1e63d6'], mode: 'free' }, // mode: free(자유) | line(직선) | shape(도형 인식)
+  hl: { color: '#fff176', width: 14, recent: ['#fff176', '#a5f3a1', '#9fd8ff'], mode: 'free' },
   eraser: { mode: 'stroke', size: 16, autoReturn: false, text: false }, // stroke | area, size: 화면 px, autoReturn: 한 번 지우면 이전 도구로, text: 텍스트도 지우기
   shape: { kind: 'rect', color: '#1e63d6', width: 2 },
   text: { color: '#111111', size: 16 },
@@ -145,6 +145,7 @@ function sanitize(s) {
   s.penGuardMs = clamp(+s.penGuardMs, 0, 2000);
   s.pen.width = clamp(+s.pen.width || 2, 0.3, 30);
   s.hl.width = clamp(+s.hl.width || 14, 2, 60);
+  for (const k of ['pen', 'hl']) if (!['free', 'line', 'shape'].includes(s[k].mode)) s[k].mode = 'free';
   s.eraser.size = clamp(+s.eraser.size || 16, 4, 120);
   s.shape.width = clamp(+s.shape.width || 2, 0.3, 30);
   s.text.size = clamp(+s.text.size || 16, 6, 120);

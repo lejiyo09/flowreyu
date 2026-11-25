@@ -7,6 +7,7 @@ import {
 } from './ink.js';
 import { uid, dist, now } from './util.js';
 import { expandGroups, cloneItems } from './arrange.js';
+import { recognize, shapeToItem, snapLine } from './shapes.js';
 
 export class ToolController {
   constructor(viewer, app) {
@@ -222,8 +223,25 @@ class PenTool {
     c.smooth = ev.snapped ? 0 : Math.min(settings.get('smoothing'), 10) * 0.065; // 0 ~ 0.65
     c.minStep = 0.35 / v.cam.z; // 화면 0.35px 미만 이동은 무시
     v.liveCanvas.style.mixBlendMode = this.kind === 'hl' ? 'multiply' : 'normal';
+    // 펜 모드: free(자유) | line(직선: 시작점~끝점, 떼기 전까지 끝점 조절) | shape(도형: 뗄 때 인식해 정돈). 자/각도기에 붙으면 자유
+    c.mode = ev.snapped ? 'free' : (cfg.mode || 'free');
+    if (c.mode === 'line') c.smooth = 0;
     this.addPoint(c, ev.sx, ev.sy, ev.p, true);
+    if (c.mode === 'line') { c.lx1 = c.pts[0]; c.ly1 = c.pts[1]; c.lx2 = c.lx1; c.ly2 = c.ly1; this.drawLine(c); return; }
     this.draw(c, null);
+  }
+
+  /** 직선 모드: 지금 손끝까지의 직선 (수평·수직·45° 근처면 맞춤) */
+  drawLine(c) {
+    const v = this.ctl.viewer, ctx = v.liveCtx;
+    v.clearLive();
+    const p = v.pages[c.page];
+    v.pageTransform(ctx, p);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, 0, p.w, p.h); ctx.clip();
+    ctx.strokeStyle = c.color; ctx.lineWidth = c.width; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(c.lx1, c.ly1); ctx.lineTo(c.lx2, c.ly2); ctx.stroke();
+    ctx.restore();
   }
 
   addPoint(c, sx, sy, p, force) {
@@ -258,6 +276,15 @@ class PenTool {
   }
 
   move(c, pts, pred, isFinal) {
+    if (c.mode === 'line') {
+      const last = pts[pts.length - 1];
+      if (!last) return;
+      const q = this.ctl.toPage(c.page, last.sx, last.sy);
+      const e = snapLine(c.lx1, c.ly1, q.x, q.y);
+      c.lx2 = e.x2; c.ly2 = e.y2;
+      this.ctl.requestLive(() => this.drawLine(c));
+      return;
+    }
     for (const p of pts) this.addPoint(c, p.sx, p.sy, p.p, false);
     if (isFinal && pts.length && c.smooth > 0) {
       // 평활화로 생긴 지연을 없애기 위해 실제 마지막 위치를 추가
@@ -297,6 +324,23 @@ class PenTool {
   end(c) {
     this.ctl.flushLive();
     const v = this.ctl.viewer;
+    const rt = c.rt ? { rt: c.rt } : {};
+    if (c.mode === 'line') {
+      if (Math.hypot(c.lx2 - c.lx1, c.ly2 - c.ly1) * v.cam.z > 4) {
+        const r = { kind: 'line', x1: c.lx1, y1: c.ly1, x2: c.lx2, y2: c.ly2 };
+        this.ctl.doc.add(c.page, { ...shapeToItem(r, { color: c.color, width: c.width, tool: this.kind }, uid), ...rt });
+      }
+      v.clearLive();
+      return;
+    }
+    if (c.mode === 'shape' && c.pts.length > 9) {
+      const r = recognize(c.pts);
+      if (r) {
+        this.ctl.doc.add(c.page, { ...shapeToItem(r, { color: c.color, width: c.width, tool: this.kind }, uid), ...rt });
+        v.clearLive();
+        return;
+      }
+    }
     if (c.pts.length) {
       const pts = roundPts(c.pts.length > 9 ? simplifyPts(c.pts, 0.04) : c.pts);
       const item = { id: uid('s'), t: 's', tool: this.kind, c: c.color, w: c.width, pr: c.pr, pts, ...(c.rt ? { rt: c.rt } : {}) };

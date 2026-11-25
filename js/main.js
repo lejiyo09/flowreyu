@@ -3777,6 +3777,7 @@ function renderToolbar() {
   if (tool !== 'type' && typing?.ed.editor.isFocused) typing.ed.editor.commands.blur(); // 펜으로 바꾸면 키보드 내림
   if (typing) updateHistoryButtons();
   for (const b of document.querySelectorAll('#toolbar [data-tool], #quickMenu [data-tool]')) b.classList.toggle('on', b.dataset.tool === tool);
+  for (const k of ['pen', 'hl']) { const m = settings.get(k).mode; for (const b of document.querySelectorAll(`#toolbar [data-tool=${k}]`)) b.dataset.mode = m === 'free' ? '' : m; } // 직선·도형 모드 표시
   const key = toolCfgKey(tool);
   const qc = $('#quickColors');
   qc.innerHTML = '';
@@ -3997,6 +3998,17 @@ function renderToolPopup(tool) {
     preview = h('<div class="preview"><canvas style="width:100%;height:40px"></canvas></div>');
     pop.appendChild(preview);
     pop.appendChild(slider('굵기', `${key}.width`, tool === 'hl' ? 4 : 0.3, tool === 'hl' ? 40 : 12, tool === 'hl' ? 1 : 0.1, (v) => (+v).toFixed(1)));
+    if (tool === 'pen' || tool === 'hl') {
+      // 필기 방식 (플렉슬의 일직선·도형 자동 생성처럼): 자유 / 직선 / 도형
+      const mode = settings.get(key).mode || 'free';
+      const seg = h(`<div class="row"><span>방식</span><div class="seg pen-mode">${[['free', '자유'], ['line', '직선'], ['shape', '도형']].map(([m, l]) => `<button value="${m}" class="${mode === m ? 'on' : ''}">${l}</button>`).join('')}</div></div>`);
+      seg.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+        settings.set(key, { ...settings.get(key), mode: b.value });
+        renderToolPopup(tool); renderToolbar();
+        toast({ free: '자유 필기', line: '직선: 누른 곳부터 뗀 곳까지 곧은 선 (수평·수직·45° 근처면 맞춤)', shape: '도형: 대충 그리면 원·삼각형·사각형·화살표 등으로 정돈 (못 알아보면 그대로)' }[b.value], { ms: 2600 });
+      }));
+      pop.appendChild(seg);
+    }
     if (tool === 'pen') {
       const row = h(`<div class="row"><span>필압</span><input type="checkbox" class="switch" ${settings.get('pressure') ? 'checked' : ''}></div>`);
       row.querySelector('input').addEventListener('change', (e) => settings.set('pressure', e.target.checked));
